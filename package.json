@@ -1,0 +1,39 @@
+{
+  "name": "application-tracking-system",
+  "private": true,
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "dotenv": "^17.2.2",
+      "zod": "^4.1.13",
+      "typescript": "^5",
+      "@prisma/client": "^7.2.0"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "build": "bun run --filter '*' build",
+    "check-types": "bun run --filter '*' check-types",
+    "dev:native": "bun run --filter native dev",
+    "dev:web": "bun run --filter web dev",
+    "db:push": "bun run --filter @application-tracking-system/db db:push",
+    "db:studio": "bun run --filter @application-tracking-system/db db:studio",
+    "db:generate": "bun run --filter @application-tracking-system/db db:generate",
+    "db:migrate": "bun run --filter @application-tracking-system/db db:migrate"
+  },
+  "dependencies": {
+    "@application-tracking-system/env": "workspace:*",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@application-tracking-system/config": "workspace:*",
+    "@types/node": "^22.13.14",
+    "typescript": "catalog:"
+  },
+  "packageManager": "bun@1.3.9"
+}

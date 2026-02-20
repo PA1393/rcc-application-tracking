@@ -1,0 +1,3 @@
+{
+  "extends": "@application-tracking-system/config/tsconfig.base.json"
+}
