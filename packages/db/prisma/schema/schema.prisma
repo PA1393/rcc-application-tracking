@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../generated"
   moduleFormat = "esm"
 }
@@ -7,3 +7,59 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model Applicant{
+
+  id                      String @id  @default(uuid())
+  name                    String
+  preferred_email         String?
+  email                   String @unique  //make sure two people do no have same email
+  notes                   String? //conflicts, preferences, follow-ups
+
+  applications Application[]    //array applications belongs to single applicant bc --> one applicant can have many applications
+  placements   Placement[]      //one application can have many placemeents OVERTIME
+
+}
+
+model Application{
+
+  id                      String @id  @default(uuid())
+  applicant_id            String  //(This links back to Table 1)
+  applicant               Applicant  @relation(fields: [applicant_id], references: [id], onDelete: Cascade)
+
+  role                    String
+  track                   String 
+  status                  String  //Applied / Interviewing / Accepted / Rejected / Waitlisted / Closed
+
+  interview_invite_sent   DateTime? 
+  acceptance_sent_at      DateTime? 
+  rejection_sent_at       DateTime? 
+
+  season                  String 
+
+
+  @@unique([applicant_id, role, season]) //same applicant can’t have duplicate application rows for the same role in the same season.
+  @@index([season]) //helps with queries
+  @@index([status]) //queries
+
+
+}
+
+model Placement{
+
+  id                      String @id  @default(uuid())
+  applicant_id            String  //(This links back to Table 1)
+  applicant               Applicant  @relation(fields: [applicant_id], references: [id], onDelete: Cascade)
+
+  track                   String 
+  role                    String //the role they won
+  placed_at DateTime @default(now())
+
+  season                  String //This is what lets the "Keycard" expire so they can apply again next year.
+
+
+  @@unique([applicant_id, track, season])
+
+
+}
+
