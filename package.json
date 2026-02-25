@@ -27,7 +27,9 @@
   },
   "dependencies": {
     "@application-tracking-system/env": "workspace:*",
+    "@types/papaparse": "^5.5.2",
     "dotenv": "catalog:",
+    "papaparse": "^5.5.3",
     "zod": "catalog:"
   },
   "devDependencies": {
