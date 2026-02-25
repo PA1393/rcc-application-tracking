@@ -13,8 +13,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "No File Uploaded or File Error"} , { status: 400 });
     }
 
-    const parsedData = await parseRawCsv(file);
-   
+   const rawParsedData = await parseRawCsv(file);
     
 
 
