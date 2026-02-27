@@ -31,7 +31,11 @@ import Papa from "papaparse";
 
   // Java: for(row : rawData) -> TS: .map()
   return rawData.map((row) => {
-    const normalizedRow: any = { rawData: row }; //clean object
+    const normalizedRow: any = { 
+      rawData: row,
+      status: "Applied", // Default status for new imports
+      track: "General"   // Default track (you can change this later)
+     }; //clean object
 
     const emailVariations = ['sjsu email', 'email', 'email address']; //modify
     const nameVariations = ['name', 'full name', 'applicant name']; //modify
@@ -75,10 +79,8 @@ import Papa from "papaparse";
         }
     }
 
-
-   
-
     return normalizedRow; 
+
   });
 }
 

@@ -1,4 +1,4 @@
-import { parseRawCsv } from "@/lib/parseCsv";
+import { normalizeData, parseRawCsv } from "@/lib/parseCsv";
 import { NextResponse } from "next/server";
  //because applicant responses can be very long, Papaparse can handle long paragraph responses without columns breaking 
 
@@ -14,8 +14,10 @@ export async function POST(request: Request) {
     }
 
    const rawParsedData = await parseRawCsv(file);
+   const cleanData = normalizeData(rawParsedData); 
+
+    return NextResponse.json({ data: cleanData }); //return import summary JSON
+
     
-
-
 }
 

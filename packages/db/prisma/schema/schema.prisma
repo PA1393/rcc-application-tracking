@@ -30,12 +30,18 @@ model Application{
   role                    String
   track                   String 
   status                  String  //Applied / Interviewing / Accepted / Rejected / Waitlisted / Closed
+  season                  String
+
+  interview_notes         String? @db.Text 
+
+  rawData                 Json?  //stores the raw responses
 
   interview_invite_sent   DateTime? 
   acceptance_sent_at      DateTime? 
   rejection_sent_at       DateTime? 
+  applied_at              DateTime  @default(now())
 
-  season                  String 
+   
 
 
   @@unique([applicant_id, role, season]) //same applicant can’t have duplicate application rows for the same role in the same season.
