@@ -1,14 +1,18 @@
-// apps/web/src/lib/prisma.ts
-// Singleton Prisma client wrapper to avoid too many connections during dev hot-reload.
-
 import { PrismaClient } from "../../../../packages/db/prisma/generated";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 
 declare global {
-  // eslint-disable-next-line no-var
   var __prismaClient__: PrismaClient | undefined;
 }
 
-const client = global.__prismaClient__ ?? new PrismaClient();
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+const adapter = new PrismaPg(pool as any);
+
+const client = global.__prismaClient__ ?? new PrismaClient({ adapter });
 
 if (!global.__prismaClient__) {
   global.__prismaClient__ = client;

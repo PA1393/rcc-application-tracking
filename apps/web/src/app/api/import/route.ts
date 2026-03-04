@@ -18,21 +18,34 @@ export async function POST(request: Request) {
    const rawParsedData = await parseRawCsv(file);
    const cleanData = normalizeData(rawParsedData); 
 
-   //after normalizing data, we can upsert applicants to database and return summary of import results (e.g. how many new applicants, how many updated, any errors, etc.)
+   //track insert/skipped counts and collect errors for a summary response
+   let inserted = 0;
+   let skipped = 0;
+   const errors: string[] = [];
 
-   for(const applicant of cleanData) {
+   for (const applicant of cleanData) {
+     // skip records flagged invalid during normalization
+     if ((applicant as any)._invalid) {
+       skipped++;
+       errors.push(
+         `Skipped row: ${(applicant as any)._reason} — raw: ${JSON.stringify(
+           (applicant as any).rawData
+         )}`
+       );
+       continue;
+     }
 
-    try {
-        const result = await upsertApplicant(applicant);
-    }
-
-    catch(error) {
-        console.error('Error upserting applicant:' + applicant.name )
-
-    }
+     try {
+       await upsertApplicant(applicant);
+       inserted++;
+     } catch (error) {
+       errors.push(`Failed on ${(applicant as any).email}: ${error}`);
+       skipped++;
+     }
    }
 
-   return NextResponse.json({ data: cleanData }); //return import summary JSON
+   //provide a concise summary instead of returning all parsed rows
+   return NextResponse.json({ inserted, skipped, errors });
 
     
 }
