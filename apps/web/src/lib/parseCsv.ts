@@ -32,8 +32,8 @@ import Papa from "papaparse";
 
 
     
-    const emailVariations = ['sjsu email', 'email', 'email address']; 
-    const nameVariations = ['name', 'full name', 'applicant name', "what is your first and last name?"]; //modify
+    const emailVariations = ['sjsu email', 'email', 'email address', 'Email Address', 'SJSU Email Address']; 
+    const nameVariations = ['name', 'full name', 'Full Name (First Last)', 'Full Name (First and Last)', 'applicant name', "what is your first and last name?"]; //modify
     const roleVariations = ['role', 'position', 'what position are you applying for?', 'which role are you interested in?', 'Which Position Are You Interested In? Details on roles available!']; //modify
     
     // Find which header in the row matches our list

@@ -20,7 +20,9 @@ export async function POST(request: Request) {
 
    //track insert/skipped counts and collect errors for a summary response
    let inserted = 0;
+   let updated = 0;
    let skipped = 0;
+   
    const errors: string[] = [];
 
    for (const applicant of cleanData) {
@@ -37,7 +39,12 @@ export async function POST(request: Request) {
 
      try {
        await upsertApplicant(applicant);
-       inserted++;
+       //track if upsert inserted or updated
+       if ((applicant as any)._isNew) {
+       inserted++;}
+       else{
+        updated++;
+       }
      } catch (error) {
        errors.push(`Failed on ${(applicant as any).email}: ${error}`);
        skipped++;
@@ -45,7 +52,7 @@ export async function POST(request: Request) {
    }
 
    //provide a concise summary instead of returning all parsed rows
-   return NextResponse.json({ inserted, skipped, errors });
+   return NextResponse.json({ inserted, updated, skipped, errors });
 
     
 }

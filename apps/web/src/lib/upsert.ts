@@ -4,6 +4,8 @@ const db = prisma;
 
 //handles Applicant database and Application database
 export async function upsertApplicant(person: any) {
+
+
     //1. upsert applicant
     const applicant = await db.applicant.upsert({
         where: { email: person.email },
@@ -48,4 +50,6 @@ export async function upsertApplicant(person: any) {
   });
 
   return { applicant, application };
+
+
 }
