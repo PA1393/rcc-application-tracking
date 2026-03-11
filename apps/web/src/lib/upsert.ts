@@ -23,33 +23,38 @@ export async function upsertApplicant(person: any) {
     });
 
 
-  const application = await db.application.upsert({
-    where: {
-      //applicant_id_role_season is a unique constraint that prevents duplicate applications for same person/role/season
-        applicant_id_role_season: {
+  // Split comma-separated roles into individual applications
+  const roles: string[] = (person.role ?? "Unknown")
+    .split(",")
+    .map((r: string) => r.trim())
+    .filter(Boolean);
+
+  const applications = await Promise.all(
+    roles.map((role) =>
+      db.application.upsert({
+        where: {
+          applicant_id_role_season: {
             applicant_id: applicant.id,
-            role: person.role ?? "Unknown", //placeholder for missing role
-        season: person.season ?? "Spring 2025", //placeholder --> changed this to current season
-      },
-    },
+            role,
+            season: person.season ?? "Spring 2025",
+          },
+        },
+        create: {
+          applicant_id: applicant.id,
+          role,
+          track: person.track ?? "General",
+          status: "To Review",
+          season: person.season ?? "Spring 2025",
+          rawData: person.rawData,
+        },
+        update: {
+          rawData: person.rawData,
+        },
+      })
+    )
+  );
 
-    //if application for this person/role/season doesnt exist, create new record with default status "Applied"
-    create: {
-      applicant_id: applicant.id,
-      role: person.role ?? "Unknown",
-      track: person.track ?? "General",
-      status: "To Review", //default status for new imports
-      season: person.season ?? "Spring 2025",
-      rawData: person.rawData,
-    },
-
-    //if already exists just refresh the data
-    update: {
-      rawData: person.rawData, 
-    },
-  });
-
-  return { applicant, application };
+  return { applicant, applications };
 
 
 }
