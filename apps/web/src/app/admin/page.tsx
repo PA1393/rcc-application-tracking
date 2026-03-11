@@ -216,6 +216,7 @@ export default function AdminPage() {
   const [selectedRole, setSelectedRole] = useState<string>("");
   const [applications, setApplications] = useState<Application[]>([]);
   const [loadingApps, setLoadingApps] = useState(false);
+  const [search, setSearch] = useState("");
 
   // Fetch distinct roles on mount
   useEffect(() => {
@@ -246,8 +247,18 @@ export default function AdminPage() {
     );
   }, []);
 
+  const filtered = search.trim()
+    ? applications.filter((a) => {
+        const q = search.toLowerCase();
+        return (
+          a.applicant.name.toLowerCase().includes(q) ||
+          a.applicant.email.toLowerCase().includes(q)
+        );
+      })
+    : applications;
+
   const byStatus = (status: Status) =>
-    applications.filter((a) => a.status === status);
+    filtered.filter((a) => a.status === status);
 
   return (
     <main className="min-h-screen p-8" style={{ backgroundColor: "#0f1117" }}>
@@ -262,8 +273,8 @@ export default function AdminPage() {
           <ImportButton />
         </div>
 
-        {/* Role selector */}
-        <div className="mb-6">
+        {/* Role selector + search */}
+        <div className="flex items-center gap-3 mb-6">
           {roles.length === 0 ? (
             <p className="text-sm text-slate-500">No roles found. Import a CSV to get started.</p>
           ) : (
@@ -277,6 +288,13 @@ export default function AdminPage() {
               ))}
             </select>
           )}
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or email..."
+            className="text-sm border border-slate-700 rounded-lg px-3 py-2 bg-[#1a2035] text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500 w-64"
+          />
         </div>
 
         {/* Kanban board */}
