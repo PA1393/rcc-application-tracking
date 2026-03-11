@@ -83,13 +83,13 @@ export default function ImportButton() {
         <select
           value={showNewInput ? ADD_NEW : selectedOpportunity}
           onChange={(e) => handleDropdownChange(e.target.value)}
-          className="text-sm border border-slate-700 rounded-lg px-3 py-2 bg-[#1a2035] text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500"
+          className="text-xs border border-slate-700 rounded-md px-2 py-1.5 bg-[#1a2035] text-slate-300 focus:outline-none focus:ring-1 focus:ring-teal-500 max-w-[160px]"
         >
           <option value="" disabled>Select opportunity...</option>
           {opportunities.map((o) => (
             <option key={o} value={o}>{o}</option>
           ))}
-          <option value={ADD_NEW}>+ Add new opportunity</option>
+          <option value={ADD_NEW}>+ Add new</option>
         </select>
 
         {/* 2. File picker */}
@@ -102,7 +102,7 @@ export default function ImportButton() {
         />
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="text-sm border border-slate-700 rounded-lg px-3 py-2 bg-[#1a2035] text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors whitespace-nowrap"
+          className="text-xs border border-slate-700 rounded-md px-2 py-1.5 bg-[#1a2035] text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors whitespace-nowrap max-w-[120px] truncate"
         >
           {selectedFile ? selectedFile.name : "Choose file..."}
         </button>
@@ -111,7 +111,7 @@ export default function ImportButton() {
         <button
           onClick={handleImport}
           disabled={!canImport}
-          className="text-sm px-4 py-2 rounded-lg font-medium bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+          className="text-xs px-3 py-1.5 rounded-md font-medium bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
         >
           {importing ? "Uploading..." : "Import CSV"}
         </button>
@@ -127,7 +127,7 @@ export default function ImportButton() {
           onBlur={handleNewOpportunityBlur}
           onKeyDown={(e) => { if (e.key === "Enter") handleNewOpportunityBlur(); }}
           placeholder="Type opportunity name..."
-          className="text-sm border border-teal-500/50 rounded-lg px-3 py-2 bg-[#1a2035] text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500 w-full"
+          className="text-xs border border-teal-500/50 rounded-md px-2 py-1.5 bg-[#1a2035] text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 w-full"
         />
       )}
     </div>

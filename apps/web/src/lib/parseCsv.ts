@@ -19,15 +19,16 @@ import Papa from "papaparse";
 
 
 
-    export function normalizeData(rawData: any[]): any[] {
+    export function normalizeData(rawData: any[], opportunity: string = ""): any[] {
 
   // Java: for(row : rawData) -> TS: .map()
-  return rawData.map((row) => { 
-    const normalizedRow: any = 
-    { 
+  return rawData.map((row) => {
+    const normalizedRow: any =
+    {
       rawData: row,
-      status: "Applied", // Default status for new imports
-      track: "General"   // Default track (you can change this later)
+      opportunity,        // stamp opportunity on every row
+      status: "Applied",  // Default status for new imports
+      track: "General"    // Default track (you can change this later)
      }; //clean object
 
 

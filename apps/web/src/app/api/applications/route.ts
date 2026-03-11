@@ -9,12 +9,16 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
   if (searchParams.get("opportunities") === "true") {
-    const rows = await prisma.application.findMany({
-      select: { opportunity: true },
-      distinct: ["opportunity"],
-      orderBy: { opportunity: "asc" },
-    });
-    return NextResponse.json(rows.map((r) => r.opportunity).filter(Boolean));
+    try {
+      const rows = await prisma.application.findMany({
+        select: { opportunity: true },
+        distinct: ["opportunity"],
+        orderBy: { opportunity: "asc" },
+      });
+      return NextResponse.json(rows.map((r) => r.opportunity).filter(Boolean));
+    } catch {
+      return NextResponse.json([]);
+    }
   }
 
   if (searchParams.get("roles") === "true") {

@@ -10,13 +10,14 @@ export async function POST(request: Request) {
 
     //recieve uploaded CSV file
     const file = formData.get("file") as File;
+    const opportunity = (formData.get("opportunity") as string) ?? "";
 
     if (!file) { //validate
         return NextResponse.json({ error: "No File Uploaded or File Error"} , { status: 400 });
     }
 
    const rawParsedData = await parseRawCsv(file);
-   const cleanData = normalizeData(rawParsedData); 
+   const cleanData = normalizeData(rawParsedData, opportunity);
 
    //track insert/skipped counts and collect errors for a summary response
    let inserted = 0;

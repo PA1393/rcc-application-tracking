@@ -281,14 +281,16 @@ function Column({
   onStatusChange: (id: string, status: string) => void;
 }) {
   return (
-    <div className={`flex flex-col min-w-0 bg-[#131929] rounded-xl border-t-2 ${columnAccent(status)} p-4`}>
-      <div className="flex items-center justify-between mb-4">
+    <div className={`flex flex-col min-w-0 bg-[#131929] rounded-xl border-t-2 ${columnAccent(status)} p-4 overflow-hidden`}>
+      {/* Sticky column header */}
+      <div className="flex items-center justify-between mb-4 shrink-0">
         <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">{status}</h3>
         <span className="text-xs bg-slate-700/60 text-slate-400 rounded-full px-2 py-0.5">
           {apps.length}
         </span>
       </div>
-      <div className="space-y-3">
+      {/* Scrollable card list */}
+      <div className="flex-1 overflow-y-auto space-y-3 pr-0.5">
         {apps.map((app) => (
           <ApplicantCard key={app.id} app={app} onOpen={onOpen} onStatusChange={onStatusChange} />
         ))}
@@ -305,34 +307,36 @@ function Column({
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
-  const [roles, setRoles] = useState<string[]>([]);
-  const [selectedRole, setSelectedRole] = useState<string>("");
+  const [opportunities, setOpportunities] = useState<string[]>([]);
+  const [selectedOpportunity, setSelectedOpportunity] = useState<string>("");
   const [applications, setApplications] = useState<Application[]>([]);
   const [loadingApps, setLoadingApps] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
 
-  // Fetch distinct roles on mount
+  // Fetch distinct opportunities on mount
   useEffect(() => {
-    fetch("/api/applications?roles=true")
+    fetch("/api/applications?opportunities=true")
       .then((r) => r.json())
+      .catch(() => [])
       .then((data: string[]) => {
-        setRoles(data);
-        if (data.length > 0) setSelectedRole(data[0]);
+        setOpportunities(data);
+        if (data.length > 0) setSelectedOpportunity(data[0]);
       });
   }, []);
 
-  // Fetch applications when selected role changes
+  // Fetch applications when selected opportunity changes
   useEffect(() => {
-    if (!selectedRole) return;
+    if (!selectedOpportunity) return;
     setLoadingApps(true);
-    fetch(`/api/applications?role=${encodeURIComponent(selectedRole)}`)
+    fetch(`/api/applications?opportunity=${encodeURIComponent(selectedOpportunity)}`)
       .then((r) => r.json())
+      .catch(() => [])
       .then((data: Application[]) => {
         setApplications(data);
         setLoadingApps(false);
       });
-  }, [selectedRole]);
+  }, [selectedOpportunity]);
 
   // Optimistic status update — moves card to new column immediately
   const handleStatusChange = useCallback((id: string, newStatus: string) => {
@@ -355,11 +359,11 @@ export default function AdminPage() {
     filtered.filter((a) => a.status === status);
 
   return (
-    <main className="min-h-screen p-8" style={{ backgroundColor: "#0f1117" }}>
-      <div className="max-w-7xl mx-auto">
+    <main className="h-screen overflow-hidden flex flex-col p-8" style={{ backgroundColor: "#0f1117" }}>
+      <div className="max-w-7xl mx-auto w-full flex flex-col flex-1 overflow-hidden">
 
         {/* Header */}
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex justify-between items-center mb-8 shrink-0">
           <div>
             <h1 className="text-3xl font-bold text-white tracking-tight">Applicant Tracking</h1>
             <p className="text-slate-400 text-sm mt-1">Manage incoming applications by opportunity.</p>
@@ -367,18 +371,18 @@ export default function AdminPage() {
           <ImportButton />
         </div>
 
-        {/* Role selector + search */}
-        <div className="flex items-center gap-3 mb-6">
-          {roles.length === 0 ? (
-            <p className="text-sm text-slate-500">No roles found. Import a CSV to get started.</p>
+        {/* Opportunity selector + search */}
+        <div className="flex items-center gap-3 mb-6 shrink-0">
+          {opportunities.length === 0 ? (
+            <p className="text-sm text-slate-500">No opportunities found. Import a CSV to get started.</p>
           ) : (
             <select
-              value={selectedRole}
-              onChange={(e) => setSelectedRole(e.target.value)}
+              value={selectedOpportunity}
+              onChange={(e) => setSelectedOpportunity(e.target.value)}
               className="text-sm border border-slate-700 rounded-lg px-3 py-2 bg-[#1a2035] text-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
             >
-              {roles.map((r) => (
-                <option key={r} value={r}>{r}</option>
+              {opportunities.map((o) => (
+                <option key={o} value={o}>{o}</option>
               ))}
             </select>
           )}
@@ -395,7 +399,7 @@ export default function AdminPage() {
         {loadingApps ? (
           <p className="text-sm text-slate-500">Loading...</p>
         ) : (
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-4 gap-4 flex-1 overflow-hidden">
             {STATUSES.map((status) => (
               <Column
                 key={status}
