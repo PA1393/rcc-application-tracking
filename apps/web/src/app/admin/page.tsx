@@ -7,6 +7,7 @@ import ImportButton from "@/components/importButton";
 
 type Application = {
   id: string;
+  applicant_id: string;
   role: string;
   track: string;
   status: string;
@@ -53,18 +54,165 @@ function getInitials(name: string) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+// ── Applicant Modal ───────────────────────────────────────────────────────────
+
+function ApplicantModal({
+  initialApp,
+  onClose,
+}: {
+  initialApp: Application;
+  onClose: () => void;
+}) {
+  const [allApps, setAllApps] = useState<Application[]>([initialApp]);
+  const [activeTab, setActiveTab] = useState(initialApp.id);
+  const [notes, setNotes] = useState(initialApp.interview_notes ?? "");
+  const [savingNotes, setSavingNotes] = useState(false);
+
+  // Fetch all applications for this applicant
+  useEffect(() => {
+    fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
+      .then((r) => r.json())
+      .then((data: Application[]) => setAllApps(data));
+  }, [initialApp.applicant_id]);
+
+  // Sync notes textarea when switching tabs or when allApps loads
+  useEffect(() => {
+    const app = allApps.find((a) => a.id === activeTab) ?? initialApp;
+    setNotes(app.interview_notes ?? "");
+  }, [activeTab, allApps]);
+
+  // Close on Escape
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const activeApp = allApps.find((a) => a.id === activeTab) ?? initialApp;
+
+  async function saveNotes() {
+    setSavingNotes(true);
+    await fetch("/api/applications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: activeApp.id, interview_notes: notes }),
+    });
+    setSavingNotes(false);
+  }
+
+  return (
+    // Backdrop — click outside to close
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
+      onClick={onClose}
+    >
+      {/* Modal panel — stop propagation */}
+      <div
+        className="bg-[#131929] rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col border border-slate-700/50 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-slate-700/50">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-full bg-teal-500/20 border border-teal-500/30 flex items-center justify-center shrink-0">
+              <span className="text-sm font-semibold text-teal-300">
+                {getInitials(initialApp.applicant.name)}
+              </span>
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white leading-tight">
+                {initialApp.applicant.name}
+              </h2>
+              <p className="text-sm text-slate-400">{initialApp.applicant.email}</p>
+            </div>
+            <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statusColor(activeApp.status)}`}>
+              {activeApp.status}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-500 hover:text-slate-200 transition-colors text-lg leading-none ml-4"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 px-6 pt-3 border-b border-slate-700/50">
+          {allApps.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => setActiveTab(a.id)}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 -mb-px ${
+                activeTab === a.id
+                  ? "text-teal-300 border-teal-400 bg-[#0f1117]/40"
+                  : "text-slate-500 border-transparent hover:text-slate-300"
+              }`}
+            >
+              {a.role}
+            </button>
+          ))}
+        </div>
+
+        {/* Scrollable tab content */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+
+          {/* Q&A cards */}
+          {activeApp.rawData && Object.keys(activeApp.rawData).length > 0 ? (
+            <div className="space-y-3">
+              {Object.entries(activeApp.rawData).map(([question, answer]) => (
+                <div
+                  key={question}
+                  className="bg-[#0f1117] rounded-lg p-4 border border-slate-700/40"
+                >
+                  <p className="text-xs text-slate-500 mb-1">{question}</p>
+                  <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">
+                    {String(answer) || "—"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-600 italic">No form responses recorded.</p>
+          )}
+
+          {/* Notes */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Interview Notes
+            </p>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              onBlur={saveNotes}
+              rows={4}
+              placeholder="Add notes..."
+              className="w-full text-sm bg-[#0f1117] border border-slate-700 text-slate-200 placeholder-slate-600 rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            {savingNotes && (
+              <p className="text-xs text-slate-500 mt-1">Saving...</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Applicant Card ────────────────────────────────────────────────────────────
 
 function ApplicantCard({
   app,
+  onOpen,
   onStatusChange,
 }: {
   app: Application;
+  onOpen: (app: Application) => void;
   onStatusChange: (id: string, status: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [notes, setNotes] = useState(app.interview_notes ?? "");
-  const [savingNotes, setSavingNotes] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
 
   async function handleStatusChange(newStatus: string) {
@@ -78,22 +226,12 @@ function ApplicantCard({
     onStatusChange(app.id, newStatus);
   }
 
-  async function saveNotes() {
-    setSavingNotes(true);
-    await fetch("/api/applications", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: app.id, interview_notes: notes }),
-    });
-    setSavingNotes(false);
-  }
-
   return (
     <div className="bg-[#1a2035] border border-slate-700/50 rounded-lg hover:border-slate-600 transition-colors">
-      {/* Card header — always visible */}
+      {/* Card body — click to open modal */}
       <div
         className="p-4 cursor-pointer select-none"
-        onClick={() => setExpanded((e) => !e)}
+        onClick={() => onOpen(app)}
       >
         <div className="flex items-start gap-3">
           {/* Avatar */}
@@ -105,20 +243,13 @@ function ApplicantCard({
 
           {/* Info */}
           <div className="min-w-0 flex-1">
-            <div className="flex justify-between items-start gap-2">
-              <p className="font-semibold text-slate-100 truncate text-sm">
-                {app.applicant.name}
-              </p>
-              <span className="text-slate-500 text-xs mt-0.5 shrink-0">
-                {expanded ? "▲" : "▼"}
-              </span>
-            </div>
+            <p className="font-semibold text-slate-100 truncate text-sm">{app.applicant.name}</p>
             <p className="text-xs text-slate-400 truncate">{app.applicant.email}</p>
             <p className="text-xs text-slate-500 mt-1">Applied {formatDate(app.applied_at)}</p>
           </div>
         </div>
 
-        {/* Status dropdown */}
+        {/* Status dropdown — stop propagation so it doesn't open the modal */}
         <div className="mt-3" onClick={(e) => e.stopPropagation()}>
           <select
             value={app.status}
@@ -132,46 +263,6 @@ function ApplicantCard({
           </select>
         </div>
       </div>
-
-      {/* Expanded section */}
-      {expanded && (
-        <div className="border-t border-slate-700/50 p-4 space-y-4">
-          {/* Raw form responses */}
-          {app.rawData && Object.keys(app.rawData).length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                Form Responses
-              </p>
-              <div className="space-y-3">
-                {Object.entries(app.rawData).map(([key, value]) => (
-                  <div key={key}>
-                    <p className="text-xs text-slate-500">{key}</p>
-                    <p className="text-sm text-slate-300 whitespace-pre-wrap">{String(value) || "—"}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Interview notes */}
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
-              Interview Notes
-            </p>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              onBlur={saveNotes}
-              rows={3}
-              placeholder="Add notes..."
-              className="w-full text-sm bg-[#0f1117] border border-slate-700 text-slate-200 placeholder-slate-600 rounded p-2 resize-none focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-            {savingNotes && (
-              <p className="text-xs text-slate-500 mt-1">Saving...</p>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -181,10 +272,12 @@ function ApplicantCard({
 function Column({
   status,
   apps,
+  onOpen,
   onStatusChange,
 }: {
   status: Status;
   apps: Application[];
+  onOpen: (app: Application) => void;
   onStatusChange: (id: string, status: string) => void;
 }) {
   return (
@@ -197,7 +290,7 @@ function Column({
       </div>
       <div className="space-y-3">
         {apps.map((app) => (
-          <ApplicantCard key={app.id} app={app} onStatusChange={onStatusChange} />
+          <ApplicantCard key={app.id} app={app} onOpen={onOpen} onStatusChange={onStatusChange} />
         ))}
         {apps.length === 0 && (
           <p className="text-xs text-slate-600 text-center py-8 border border-dashed border-slate-700/50 rounded-lg">
@@ -217,6 +310,7 @@ export default function AdminPage() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loadingApps, setLoadingApps] = useState(false);
   const [search, setSearch] = useState("");
+  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
 
   // Fetch distinct roles on mount
   useEffect(() => {
@@ -307,12 +401,21 @@ export default function AdminPage() {
                 key={status}
                 status={status}
                 apps={byStatus(status)}
+                onOpen={setSelectedApp}
                 onStatusChange={handleStatusChange}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* Full-page modal */}
+      {selectedApp && (
+        <ApplicantModal
+          initialApp={selectedApp}
+          onClose={() => setSelectedApp(null)}
+        />
+      )}
     </main>
   );
 }

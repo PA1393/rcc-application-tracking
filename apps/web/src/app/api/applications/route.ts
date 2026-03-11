@@ -1,8 +1,9 @@
 import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
-// GET /api/applications?roles=true          → distinct role list
-// GET /api/applications?role=<role>         → all applications for that role
+// GET /api/applications?roles=true              → distinct role list
+// GET /api/applications?role=<role>             → all applications for that role
+// GET /api/applications?applicantId=<id>        → all applications for one applicant
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
@@ -13,6 +14,16 @@ export async function GET(request: Request) {
       orderBy: { role: "asc" },
     });
     return NextResponse.json(rows.map((r) => r.role));
+  }
+
+  const applicantId = searchParams.get("applicantId");
+  if (applicantId) {
+    const applications = await prisma.application.findMany({
+      where: { applicant_id: applicantId },
+      include: { applicant: { select: { name: true, email: true } } },
+      orderBy: { applied_at: "asc" },
+    });
+    return NextResponse.json(applications);
   }
 
   const role = searchParams.get("role");
