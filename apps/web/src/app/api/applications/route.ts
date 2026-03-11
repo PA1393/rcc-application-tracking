@@ -1,11 +1,21 @@
 import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
-// GET /api/applications?roles=true              → distinct role list
-// GET /api/applications?role=<role>             → all applications for that role
+// GET /api/applications?opportunities=true      → distinct opportunity list
+// GET /api/applications?opportunity=<name>      → all applications for that opportunity
+// GET /api/applications?roles=true              → distinct role list (legacy)
 // GET /api/applications?applicantId=<id>        → all applications for one applicant
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+
+  if (searchParams.get("opportunities") === "true") {
+    const rows = await prisma.application.findMany({
+      select: { opportunity: true },
+      distinct: ["opportunity"],
+      orderBy: { opportunity: "asc" },
+    });
+    return NextResponse.json(rows.map((r) => r.opportunity).filter(Boolean));
+  }
 
   if (searchParams.get("roles") === "true") {
     const rows = await prisma.application.findMany({
@@ -26,13 +36,13 @@ export async function GET(request: Request) {
     return NextResponse.json(applications);
   }
 
-  const role = searchParams.get("role");
-  if (!role) {
-    return NextResponse.json({ error: "role param required" }, { status: 400 });
+  const opportunity = searchParams.get("opportunity");
+  if (!opportunity) {
+    return NextResponse.json({ error: "opportunity param required" }, { status: 400 });
   }
 
   const applications = await prisma.application.findMany({
-    where: { role },
+    where: { opportunity },
     include: { applicant: { select: { name: true, email: true } } },
     orderBy: { applied_at: "asc" },
   });

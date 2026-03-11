@@ -37,6 +37,7 @@ export async function upsertApplicant(person: any) {
     create: {
       applicant_id: applicant.id,
       role: person.role ?? "Unknown",
+      opportunity: person.opportunity ?? "",
       track: person.track ?? "General",
       status: "To Review", //default status for new imports
       season: person.season ?? "Spring 2025",
@@ -45,7 +46,8 @@ export async function upsertApplicant(person: any) {
 
     //if already exists just refresh the data
     update: {
-      rawData: person.rawData, 
+      rawData: person.rawData,
+      opportunity: person.opportunity ?? "",
     },
   });
 
