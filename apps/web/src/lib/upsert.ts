@@ -38,7 +38,7 @@ export async function upsertApplicant(person: any) {
       applicant_id: applicant.id,
       role: person.role ?? "Unknown",
       track: person.track ?? "General",
-      status: "Applied", //default status for new imports
+      status: "To Review", //default status for new imports
       season: person.season ?? "Spring 2025",
       rawData: person.rawData,
     },
