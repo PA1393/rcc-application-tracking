@@ -28,8 +28,9 @@ model Application{
   applicant_id            String  //(This links back to Table 1)
   applicant               Applicant  @relation(fields: [applicant_id], references: [id], onDelete: Cascade)
 
+  opportunity             String  @default("") //the program/event (e.g. "Creative Destination Program")
   role                    String
-  track                   String 
+  track                   String
   status                  String  //Applied / Interviewing / Accepted / Rejected / Waitlisted / Closed
   season                  String
 
