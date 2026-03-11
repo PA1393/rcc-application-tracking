@@ -18,7 +18,7 @@ type Application = {
   applicant: { name: string; email: string };
 };
 
-const STATUSES = ["To Review", "Interviewing", "Accepted", "Rejected"] as const;
+const STATUSES = ["To Review", "Interviewing", "Rejected", "Accepted"] as const;
 type Status = (typeof STATUSES)[number];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
