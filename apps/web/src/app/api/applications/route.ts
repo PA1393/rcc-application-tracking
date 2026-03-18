@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { acceptApplicant } from "@/lib/placement";
 
 // GET /api/applications?opportunities=true      → distinct opportunity list
 // GET /api/applications?opportunity=<name>      → all applications for that opportunity
@@ -63,13 +64,16 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
   }
 
-  const updated = await prisma.application.update({
-    where: { id },
-    data: {
-      ...(status !== undefined && { status }),
-      ...(interview_notes !== undefined && { interview_notes }),
-    },
-  });
+  const updated =
+    status === "Accepted"
+      ? await acceptApplicant(id)
+      : await prisma.application.update({
+          where: { id },
+          data: {
+            ...(status !== undefined && { status }),
+            ...(interview_notes !== undefined && { interview_notes }),
+          },
+        });
 
   return NextResponse.json(updated);
 }
