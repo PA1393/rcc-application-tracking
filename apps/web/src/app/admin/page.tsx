@@ -56,17 +56,32 @@ function getInitials(name: string) {
 
 // ── Applicant Modal ───────────────────────────────────────────────────────────
 
+const ACTION_STATUSES = ["Interviewing", "Accepted", "Rejected"] as const;
+
+function statusButtonStyle(status: string) {
+  switch (status) {
+    case "Interviewing": return "bg-blue-800/60 text-blue-200 hover:bg-blue-700/60 border border-blue-700/50";
+    case "Accepted":     return "bg-teal-800/60 text-teal-200 hover:bg-teal-700/60 border border-teal-700/50";
+    case "Rejected":     return "bg-red-800/40 text-red-300 hover:bg-red-700/40 border border-red-700/40";
+    default:             return "bg-slate-700 text-slate-300 hover:bg-slate-600 border border-slate-600";
+  }
+}
+
 function ApplicantModal({
   initialApp,
   onClose,
+  onStatusChange,
 }: {
   initialApp: Application;
   onClose: () => void;
+  onStatusChange: (id: string, status: string) => void;
 }) {
   const [allApps, setAllApps] = useState<Application[]>([initialApp]);
   const [activeTab, setActiveTab] = useState(initialApp.id);
   const [notes, setNotes] = useState(initialApp.interview_notes ?? "");
   const [savingNotes, setSavingNotes] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [changingStatus, setChangingStatus] = useState(false);
 
   // Fetch all applications for this applicant
   useEffect(() => {
@@ -81,14 +96,17 @@ function ApplicantModal({
     setNotes(app.interview_notes ?? "");
   }, [activeTab, allApps]);
 
-  // Close on Escape
+  // Close on Escape (only when no confirmation is open)
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (pendingStatus) setPendingStatus(null);
+        else onClose();
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, pendingStatus]);
 
   const activeApp = allApps.find((a) => a.id === activeTab) ?? initialApp;
 
@@ -102,18 +120,65 @@ function ApplicantModal({
     setSavingNotes(false);
   }
 
+  async function confirmStatusChange() {
+    if (!pendingStatus) return;
+    setChangingStatus(true);
+    await fetch("/api/applications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: activeApp.id, status: pendingStatus }),
+    });
+    // Optimistically update local allApps so the badge reflects the change
+    setAllApps((prev) =>
+      prev.map((a) => (a.id === activeApp.id ? { ...a, status: pendingStatus } : a))
+    );
+    onStatusChange(activeApp.id, pendingStatus);
+    setPendingStatus(null);
+    setChangingStatus(false);
+  }
+
   return (
     // Backdrop — click outside to close
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
-      onClick={onClose}
+      onClick={() => { if (!pendingStatus) onClose(); }}
     >
       {/* Modal panel — stop propagation */}
       <div
-        className="bg-[#131929] rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col border border-slate-700/50 shadow-2xl"
+        className="relative bg-[#131929] rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col border border-slate-700/50 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
+
+        {/* Confirmation overlay */}
+        {pendingStatus && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-black/60 backdrop-blur-sm">
+            <div className="bg-[#1a2035] border border-slate-700 rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl">
+              <p className="text-white text-sm leading-relaxed mb-5">
+                Are you sure you want to change{" "}
+                <span className="text-teal-300 font-semibold">{initialApp.applicant.name}</span>'s
+                status to{" "}
+                <span className="font-bold">{pendingStatus}</span>?
+              </p>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setPendingStatus(null)}
+                  className="text-sm px-4 py-1.5 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmStatusChange}
+                  disabled={changingStatus}
+                  className="text-sm px-4 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
+                >
+                  {changingStatus ? "Saving..." : "Confirm"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-slate-700/50">
           <div className="flex items-center gap-4">
@@ -196,6 +261,25 @@ function ApplicantModal({
               <p className="text-xs text-slate-500 mt-1">Saving...</p>
             )}
           </div>
+
+          {/* Change Status */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Change Status
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              {ACTION_STATUSES.filter((s) => s !== activeApp.status).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setPendingStatus(s)}
+                  className={`text-sm px-4 py-1.5 rounded-lg font-medium transition-colors ${statusButtonStyle(s)}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
@@ -207,32 +291,16 @@ function ApplicantModal({
 function ApplicantCard({
   app,
   onOpen,
-  onStatusChange,
 }: {
   app: Application;
   onOpen: (app: Application) => void;
-  onStatusChange: (id: string, status: string) => void;
 }) {
-  const [changingStatus, setChangingStatus] = useState(false);
-
-  async function handleStatusChange(newStatus: string) {
-    setChangingStatus(true);
-    await fetch("/api/applications", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: app.id, status: newStatus }),
-    });
-    setChangingStatus(false);
-    onStatusChange(app.id, newStatus);
-  }
-
   return (
-    <div className="bg-[#1a2035] border border-slate-700/50 rounded-lg hover:border-slate-600 transition-colors">
-      {/* Card body — click to open modal */}
-      <div
-        className="p-4 cursor-pointer select-none"
-        onClick={() => onOpen(app)}
-      >
+    <div
+      className="bg-[#1a2035] border border-slate-700/50 rounded-lg hover:border-slate-600 transition-colors cursor-pointer select-none"
+      onClick={() => onOpen(app)}
+    >
+      <div className="p-4">
         <div className="flex items-start gap-3">
           {/* Avatar */}
           <div className="shrink-0 w-9 h-9 rounded-full bg-teal-500/20 border border-teal-500/30 flex items-center justify-center">
@@ -249,18 +317,11 @@ function ApplicantCard({
           </div>
         </div>
 
-        {/* Status dropdown — stop propagation so it doesn't open the modal */}
-        <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-          <select
-            value={app.status}
-            disabled={changingStatus}
-            onChange={(e) => handleStatusChange(e.target.value)}
-            className={`w-full text-xs font-medium rounded px-2 py-1 border-0 cursor-pointer focus:ring-2 focus:ring-offset-0 focus:ring-teal-500 ${statusColor(app.status)}`}
-          >
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
+        {/* Static status badge */}
+        <div className="mt-3">
+          <span className={`text-xs font-medium px-2 py-0.5 rounded ${statusColor(app.status)}`}>
+            {app.status}
+          </span>
         </div>
       </div>
     </div>
@@ -273,12 +334,10 @@ function Column({
   status,
   apps,
   onOpen,
-  onStatusChange,
 }: {
   status: Status;
   apps: Application[];
   onOpen: (app: Application) => void;
-  onStatusChange: (id: string, status: string) => void;
 }) {
   return (
     <div className={`flex flex-col min-w-0 bg-[#131929] rounded-xl border-t-2 ${columnAccent(status)} p-4 overflow-hidden`}>
@@ -292,7 +351,7 @@ function Column({
       {/* Scrollable card list */}
       <div className="flex-1 overflow-y-auto space-y-3 pr-0.5">
         {apps.map((app) => (
-          <ApplicantCard key={app.id} app={app} onOpen={onOpen} onStatusChange={onStatusChange} />
+          <ApplicantCard key={app.id} app={app} onOpen={onOpen} />
         ))}
         {apps.length === 0 && (
           <p className="text-xs text-slate-600 text-center py-8 border border-dashed border-slate-700/50 rounded-lg">
@@ -406,7 +465,6 @@ export default function AdminPage() {
                 status={status}
                 apps={byStatus(status)}
                 onOpen={setSelectedApp}
-                onStatusChange={handleStatusChange}
               />
             ))}
           </div>
@@ -418,6 +476,7 @@ export default function AdminPage() {
         <ApplicantModal
           initialApp={selectedApp}
           onClose={() => setSelectedApp(null)}
+          onStatusChange={handleStatusChange}
         />
       )}
     </main>
