@@ -18,11 +18,18 @@ function bodyToHtml(text: string): string {
 }
 
 export async function POST(request: Request) {
-  const { applicationId, subject, body } = await request.json() as {
+  const { applicationId, subject, body, to: toOverride } = await request.json() as {
     applicationId: string;
     subject: string;
     body: string;
+    to?: string;
   };
+
+  if (toOverride !== undefined) {
+    if (!toOverride || !toOverride.includes("@")) {
+      return NextResponse.json({ error: "Invalid email address" }, { status: 400 });
+    }
+  }
 
   // Fetch application + applicant
   const application = await prisma.application.findUnique({
@@ -52,7 +59,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const to = application.applicant.preferred_email ?? application.applicant.email;
+  const to = toOverride ?? application.applicant.preferred_email ?? application.applicant.email;
 
   try {
     const info = await sendEmail({

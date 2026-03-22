@@ -53,6 +53,13 @@ function formatDate(iso: string) {
   });
 }
 
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
+}
+
 function getInitials(name: string) {
   const parts = name.trim().split(" ");
   if (parts.length === 1) return parts[0][0].toUpperCase();
@@ -88,6 +95,7 @@ function EmailDraftModal({
     opportunity: app.opportunity,
   });
 
+  const [to, setTo] = useState(app.applicant.email);
   const [subject, setSubject] = useState(template.subject);
   const [body, setBody] = useState(template.body);
   const [sending, setSending] = useState(false);
@@ -102,7 +110,7 @@ function EmailDraftModal({
       const res = await fetch("/api/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ applicationId: app.id, subject, body }),
+        body: JSON.stringify({ applicationId: app.id, subject, body, to }),
       });
       const data = await res.json();
       if (res.ok || res.status === 409) {
@@ -155,12 +163,15 @@ function EmailDraftModal({
             </div>
           )}
 
-          {/* To (read-only) */}
+          {/* To (editable) */}
           <div>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">To</p>
-            <p className="text-sm text-slate-300 bg-[#0f1117] border border-slate-700 rounded-lg px-3 py-2">
-              {app.applicant.email}
-            </p>
+            <input
+              type="email"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="w-full text-sm bg-[#0f1117] border border-slate-700 text-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
           </div>
 
           {/* Subject */}
@@ -218,10 +229,12 @@ function ApplicantModal({
   initialApp,
   onClose,
   onStatusChange,
+  onRefreshBoard,
 }: {
   initialApp: Application;
   onClose: () => void;
   onStatusChange: (id: string, status: string) => void;
+  onRefreshBoard: () => void;
 }) {
   const [allApps, setAllApps] = useState<Application[]>([initialApp]);
   const [activeTab, setActiveTab] = useState(initialApp.id);
@@ -313,6 +326,11 @@ function ApplicantModal({
           onSent={() => {
             setEmailDraftStatus(null);
             setToastVisible(true);
+            onRefreshBoard();
+            // Re-fetch allApps so email history timestamps update in the modal
+            fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
+              .then((r) => r.json())
+              .then((data: Application[]) => setAllApps(data));
           }}
         />
       )}
@@ -466,6 +484,42 @@ function ApplicantModal({
               </div>
             </div>
 
+            {/* Email History */}
+            {(() => {
+              const rows: { label: string; sentAt: string | null }[] = [];
+              const s = activeApp.status;
+              if (s === "Interviewing" || s === "Accepted" || s === "Rejected") {
+                rows.push({ label: "Interview invite", sentAt: activeApp.interview_invite_sent });
+              }
+              if (s === "Accepted") {
+                rows.push({ label: "Acceptance email", sentAt: activeApp.acceptance_sent_at });
+              }
+              if (s === "Rejected") {
+                rows.push({ label: "Rejection email", sentAt: activeApp.rejection_sent_at });
+              }
+              if (rows.length === 0) return null;
+              return (
+                <div>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                    Email History
+                  </p>
+                  <div className="space-y-1.5">
+                    {rows.map(({ label, sentAt }) => (
+                      <div key={label} className="flex items-center gap-2">
+                        <span className={`text-sm ${sentAt ? "text-teal-400" : "text-slate-600"}`}>✉</span>
+                        <span className="text-xs text-slate-400">{label}</span>
+                        {sentAt ? (
+                          <span className="text-xs text-teal-400 ml-auto">{formatDateTime(sentAt)}</span>
+                        ) : (
+                          <span className="text-xs text-slate-600 ml-auto">not sent</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
           </div>
         </div>
       </div>
@@ -504,11 +558,18 @@ function ApplicantCard({
           </div>
         </div>
 
-        {/* Static status badge */}
-        <div className="mt-3">
+        {/* Status badge + mail indicator */}
+        <div className="mt-3 flex items-center justify-between">
           <span className={`text-xs font-medium px-2 py-0.5 rounded ${statusColor(app.status)}`}>
             {app.status}
           </span>
+          {(EMAIL_STATUSES as readonly string[]).includes(app.status) && (
+            <span className={`flex items-center gap-1 text-xs ${
+              statusToSentAt(app.status, app) ? "text-teal-400" : "text-slate-600"
+            }`}>
+              ✉ {statusToSentAt(app.status, app) ? "Sent" : "Not sent"}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -571,8 +632,8 @@ export default function AdminPage() {
       });
   }, []);
 
-  // Fetch applications when selected opportunity changes
-  useEffect(() => {
+  // Fetch applications for the selected opportunity
+  const fetchApps = useCallback(() => {
     if (!selectedOpportunity) return;
     setLoadingApps(true);
     fetch(`/api/applications?opportunity=${encodeURIComponent(selectedOpportunity)}`)
@@ -583,6 +644,10 @@ export default function AdminPage() {
         setLoadingApps(false);
       });
   }, [selectedOpportunity]);
+
+  useEffect(() => {
+    fetchApps();
+  }, [fetchApps]);
 
   // Optimistic status update — moves card to new column immediately
   const handleStatusChange = useCallback((id: string, newStatus: string) => {
@@ -664,6 +729,7 @@ export default function AdminPage() {
           initialApp={selectedApp}
           onClose={() => setSelectedApp(null)}
           onStatusChange={handleStatusChange}
+          onRefreshBoard={fetchApps}
         />
       )}
     </main>
