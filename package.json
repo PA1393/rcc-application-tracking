@@ -30,12 +30,14 @@
     "@prisma/client-runtime-utils": "^7.4.2",
     "@types/papaparse": "^5.5.2",
     "dotenv": "catalog:",
+    "nodemailer": "^8.0.3",
     "papaparse": "^5.5.3",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@application-tracking-system/config": "workspace:*",
     "@types/node": "^22.13.14",
+    "@types/nodemailer": "^7.0.11",
     "typescript": "catalog:"
   },
   "packageManager": "bun@1.3.9"
