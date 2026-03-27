@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev --port 3001",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@application-tracking-system/env": "workspace:*",
@@ -35,7 +37,9 @@
     "@types/pg": "^8.18.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
     "tailwindcss": "^4.1.10",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "^4.1.2"
   }
 }
