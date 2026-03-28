@@ -78,6 +78,20 @@ function statusToSentAt(status: string, app: Application): string | null {
 
 const EMAIL_STATUSES = ["Interviewing", "Accepted", "Rejected"] as const;
 
+const AMBASSADOR_TEAMS = [
+  "Consulting Team",
+  "Industry Relations Team",
+  "Case Competition Team",
+  "Membership Outreach Team",
+  "Workshops Team",
+  "Journalism Team",
+  "Digital Marketing Team",
+  "Graphic Design Team",
+  "Finance Team",
+  "Web Development Team",
+  "Growth Analytics Team",
+] as const;
+
 // ── Email Draft Modal ─────────────────────────────────────────────────────────
 
 function EmailDraftModal({
@@ -554,6 +568,9 @@ function ApplicantCard({
           <div className="min-w-0 flex-1">
             <p className="font-semibold text-slate-100 truncate text-sm">{app.applicant.name}</p>
             <p className="text-xs text-slate-400 truncate">{app.applicant.email}</p>
+            {app.track === "Ambassador" && app.rawData?._teamPreference1 && (
+              <p className="text-xs text-slate-500 truncate">Prefers: {app.rawData._teamPreference1}</p>
+            )}
             <p className="text-xs text-slate-500 mt-1">Applied {formatDate(app.applied_at)}</p>
           </div>
         </div>
@@ -620,6 +637,7 @@ export default function AdminPage() {
   const [loadingApps, setLoadingApps] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+  const [selectedTeam, setSelectedTeam] = useState("All Teams");
 
   // Fetch distinct opportunities and auto-select the first one on mount
   const fetchOpportunities = useCallback((autoSelect = false) => {
@@ -653,6 +671,14 @@ export default function AdminPage() {
     fetchApps();
   }, [fetchApps]);
 
+  // True when the loaded applications contain at least one Ambassador track entry
+  const isAmbassadorBoard = applications.some((a) => a.track === "Ambassador");
+
+  // Reset team filter when switching to a non-Ambassador opportunity
+  useEffect(() => {
+    if (!isAmbassadorBoard) setSelectedTeam("All Teams");
+  }, [isAmbassadorBoard]);
+
   // Re-fetches both the opportunity list and the board after a CSV import
   const handleImportSuccess = useCallback(() => {
     fetchOpportunities(false);
@@ -666,15 +692,17 @@ export default function AdminPage() {
     );
   }, []);
 
-  const filtered = search.trim()
-    ? applications.filter((a) => {
-        const q = search.toLowerCase();
-        return (
-          a.applicant.name.toLowerCase().includes(q) ||
-          a.applicant.email.toLowerCase().includes(q)
-        );
-      })
-    : applications;
+  const filtered = applications.filter((a) => {
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      if (!a.applicant.name.toLowerCase().includes(q) && !a.applicant.email.toLowerCase().includes(q)) return false;
+    }
+    if (isAmbassadorBoard && selectedTeam !== "All Teams") {
+      const prefs = [a.rawData?._teamPreference1, a.rawData?._teamPreference2, a.rawData?._teamPreference3];
+      if (!prefs.some((p) => p === selectedTeam)) return false;
+    }
+    return true;
+  });
 
   const byStatus = (status: Status) =>
     filtered.filter((a) => a.status === status);
@@ -704,6 +732,18 @@ export default function AdminPage() {
             >
               {opportunities.map((o) => (
                 <option key={o} value={o}>{o}</option>
+              ))}
+            </select>
+          )}
+          {isAmbassadorBoard && (
+            <select
+              value={selectedTeam}
+              onChange={(e) => setSelectedTeam(e.target.value)}
+              className="text-sm border border-slate-700 rounded-lg px-3 py-2 bg-[#1a2035] text-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              <option value="All Teams">All Teams</option>
+              {AMBASSADOR_TEAMS.map((t) => (
+                <option key={t} value={t}>{t}</option>
               ))}
             </select>
           )}
