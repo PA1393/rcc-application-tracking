@@ -621,16 +621,20 @@ export default function AdminPage() {
   const [search, setSearch] = useState("");
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
 
-  // Fetch distinct opportunities on mount
-  useEffect(() => {
+  // Fetch distinct opportunities and auto-select the first one on mount
+  const fetchOpportunities = useCallback((autoSelect = false) => {
     fetch("/api/applications?opportunities=true")
       .then((r) => r.json())
       .catch(() => [])
       .then((data: string[]) => {
         setOpportunities(data);
-        if (data.length > 0) setSelectedOpportunity(data[0]);
+        if (autoSelect && data.length > 0) setSelectedOpportunity(data[0]);
       });
   }, []);
+
+  useEffect(() => {
+    fetchOpportunities(true);
+  }, [fetchOpportunities]);
 
   // Fetch applications for the selected opportunity
   const fetchApps = useCallback(() => {
@@ -648,6 +652,12 @@ export default function AdminPage() {
   useEffect(() => {
     fetchApps();
   }, [fetchApps]);
+
+  // Re-fetches both the opportunity list and the board after a CSV import
+  const handleImportSuccess = useCallback(() => {
+    fetchOpportunities(false);
+    fetchApps();
+  }, [fetchOpportunities, fetchApps]);
 
   // Optimistic status update — moves card to new column immediately
   const handleStatusChange = useCallback((id: string, newStatus: string) => {
@@ -679,7 +689,7 @@ export default function AdminPage() {
             <h1 className="text-3xl font-bold text-white tracking-tight">Applicant Tracking</h1>
             <p className="text-slate-400 text-sm mt-1">Manage incoming applications by opportunity.</p>
           </div>
-          <ImportButton />
+          <ImportButton onImportSuccess={handleImportSuccess} />
         </div>
 
         {/* Opportunity selector + search */}

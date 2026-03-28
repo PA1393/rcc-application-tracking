@@ -1,12 +1,21 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 const ADD_NEW = "__add_new__";
 
-export default function ImportButton() {
-  const router = useRouter();
+type ImportSummary = {
+  inserted: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+};
+
+export default function ImportButton({
+  onImportSuccess,
+}: {
+  onImportSuccess: () => void;
+}) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [opportunities, setOpportunities] = useState<string[]>([]);
@@ -17,6 +26,9 @@ export default function ImportButton() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
 
+  const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [errorsExpanded, setErrorsExpanded] = useState(false);
+
   // Fetch existing opportunity names on mount
   useEffect(() => {
     fetch("/api/applications?opportunities=true")
@@ -24,7 +36,7 @@ export default function ImportButton() {
       .then((data) => {
         if (Array.isArray(data)) setOpportunities(data);
       })
-      .catch(() => {}); // gracefully handle if not yet wired
+      .catch(() => {});
   }, []);
 
   function handleDropdownChange(value: string) {
@@ -40,7 +52,6 @@ export default function ImportButton() {
   function handleNewOpportunityBlur() {
     const trimmed = newOpportunityName.trim();
     if (!trimmed) return;
-    // Optimistically add to dropdown list if not already there
     if (!opportunities.includes(trimmed)) {
       setOpportunities((prev) => [...prev, trimmed]);
     }
@@ -56,17 +67,27 @@ export default function ImportButton() {
     if (!selectedFile || !selectedOpportunity) return;
 
     setImporting(true);
+    setSummary(null);
+    setErrorsExpanded(false);
+
     const formData = new FormData();
     formData.append("file", selectedFile);
     formData.append("opportunity", selectedOpportunity);
 
     try {
-      await fetch("/api/import", { method: "POST", body: formData });
-      router.refresh();
-      setSelectedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      const res = await fetch("/api/import", { method: "POST", body: formData });
+      const data: ImportSummary = await res.json();
+
+      if (res.ok) {
+        setSummary(data);
+        onImportSuccess();
+        setSelectedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } else {
+        setSummary({ inserted: 0, updated: 0, skipped: 0, errors: ["Import failed. Please try again."] });
+      }
     } catch (error) {
-      console.error("Import failed:", error);
+      setSummary({ inserted: 0, updated: 0, skipped: 0, errors: [(error as Error).message] });
     } finally {
       setImporting(false);
     }
@@ -129,6 +150,49 @@ export default function ImportButton() {
           placeholder="Type opportunity name..."
           className="text-xs border border-teal-500/50 rounded-md px-2 py-1.5 bg-[#1a2035] text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 w-full"
         />
+      )}
+
+      {/* Import summary banner */}
+      {summary && (
+        <div className="w-full rounded-lg border border-slate-700/60 bg-[#1a2035] text-xs overflow-hidden">
+          {/* Summary counts row */}
+          <div className="flex items-center justify-between gap-4 px-3 py-2">
+            <div className="flex items-center gap-4">
+              <span className="text-teal-400 font-medium">{summary.inserted} inserted</span>
+              <span className="text-blue-400 font-medium">{summary.updated} updated</span>
+              <span className="text-amber-400 font-medium">{summary.skipped} skipped</span>
+            </div>
+            <button
+              onClick={() => setSummary(null)}
+              className="text-slate-500 hover:text-slate-300 transition-colors leading-none ml-2"
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Expandable errors list */}
+          {summary.errors.length > 0 && (
+            <div className="border-t border-slate-700/50">
+              <button
+                onClick={() => setErrorsExpanded((v) => !v)}
+                className="w-full flex items-center justify-between px-3 py-1.5 text-red-400 hover:text-red-300 transition-colors"
+              >
+                <span>{summary.errors.length} row{summary.errors.length !== 1 ? "s" : ""} with errors</span>
+                <span className="text-slate-500">{errorsExpanded ? "▲" : "▼"}</span>
+              </button>
+              {errorsExpanded && (
+                <ul className="px-3 pb-2 space-y-1 max-h-32 overflow-y-auto">
+                  {summary.errors.map((err, i) => (
+                    <li key={i} className="text-red-400/80 leading-snug">
+                      {err}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
