@@ -14,11 +14,13 @@ export async function upsertApplicant(person: any) {
         create: {
           email: person.email,
           name: person.name,
+          ...(person.preferred_email ? { preferred_email: person.preferred_email } : {}),
         },
 
         //do exist --> update their record with new name (if it changed)
         update: {
           name: person.name,
+          ...(person.preferred_email ? { preferred_email: person.preferred_email } : {}),
         },
     });
 

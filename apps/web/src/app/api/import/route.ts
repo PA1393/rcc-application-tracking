@@ -1,4 +1,4 @@
-import { normalizeData, parseRawCsv } from "@/lib/parseCsv";
+import { normalizeData, normalizeAmbassadorData, parseRawCsv } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
 import { NextResponse } from "next/server";
  //because applicant responses can be very long, Papaparse can handle long paragraph responses without columns breaking 
@@ -11,13 +11,16 @@ export async function POST(request: Request) {
     //recieve uploaded CSV file
     const file = formData.get("file") as File;
     const opportunity = (formData.get("opportunity") as string) ?? "";
+    const formType = (formData.get("formType") as string) ?? "project";
 
     if (!file) { //validate
         return NextResponse.json({ error: "No File Uploaded or File Error"} , { status: 400 });
     }
 
    const rawParsedData = await parseRawCsv(file);
-   const cleanData = normalizeData(rawParsedData, opportunity);
+   const cleanData = formType === "ambassador"
+     ? normalizeAmbassadorData(rawParsedData, opportunity)
+     : normalizeData(rawParsedData, opportunity);
 
    //track insert/skipped counts and collect errors for a summary response
    let inserted = 0;

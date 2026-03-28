@@ -25,6 +25,7 @@ export default function ImportButton({
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
+  const [selectedFormType, setSelectedFormType] = useState<"project" | "ambassador">("project");
 
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [errorsExpanded, setErrorsExpanded] = useState(false);
@@ -73,6 +74,7 @@ export default function ImportButton({
     const formData = new FormData();
     formData.append("file", selectedFile);
     formData.append("opportunity", selectedOpportunity);
+    formData.append("formType", selectedFormType);
 
     try {
       const res = await fetch("/api/import", { method: "POST", body: formData });
@@ -97,6 +99,23 @@ export default function ImportButton({
 
   return (
     <div className="flex flex-col gap-2 items-end">
+      {/* Form type toggle — determines which normalizer runs on the backend */}
+      <div className="flex rounded-md border border-slate-700 bg-[#0f1117] p-0.5 gap-0.5">
+        {(["project", "ambassador"] as const).map((type) => (
+          <button
+            key={type}
+            onClick={() => setSelectedFormType(type)}
+            className={`text-xs px-3 py-1 rounded font-medium transition-colors whitespace-nowrap ${
+              selectedFormType === type
+                ? "bg-slate-600 text-white"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            {type === "project" ? "Project / Intern" : "Ambassador"}
+          </button>
+        ))}
+      </div>
+
       {/* Row: opportunity dropdown + file picker + import button */}
       <div className="flex items-center gap-2">
 
