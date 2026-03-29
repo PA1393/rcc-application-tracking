@@ -244,11 +244,13 @@ function ApplicantModal({
   onClose,
   onStatusChange,
   onRefreshBoard,
+  boardOpportunity,
 }: {
   initialApp: Application;
   onClose: () => void;
   onStatusChange: (id: string, status: string) => void;
   onRefreshBoard: () => void;
+  boardOpportunity: string;
 }) {
   const [allApps, setAllApps] = useState<Application[]>([initialApp]);
   const [activeTab, setActiveTab] = useState(initialApp.id);
@@ -435,7 +437,7 @@ function ApplicantModal({
                     : "text-slate-500 border-transparent hover:text-slate-300"
                 }`}
               >
-                {a.role}
+                {a.opportunity === boardOpportunity ? a.role : a.opportunity}
               </button>
             ))}
           </div>
@@ -780,6 +782,7 @@ export default function AdminPage() {
           onClose={() => setSelectedApp(null)}
           onStatusChange={handleStatusChange}
           onRefreshBoard={fetchApps}
+          boardOpportunity={selectedOpportunity}
         />
       )}
     </main>
