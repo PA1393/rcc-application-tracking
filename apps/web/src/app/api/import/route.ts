@@ -1,4 +1,4 @@
-import { normalizeData, normalizeAmbassadorData, parseRawCsv } from "@/lib/parseCsv";
+import { normalizeData, normalizeAmbassadorData, parseRawCsv, detectCsvFormType } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
 import { NextResponse } from "next/server";
  //because applicant responses can be very long, Papaparse can handle long paragraph responses without columns breaking 
@@ -18,6 +18,29 @@ export async function POST(request: Request) {
     }
 
    const rawParsedData = await parseRawCsv(file);
+
+   // Detect the actual form type from the CSV headers before normalizing
+   const detectedType = detectCsvFormType(rawParsedData);
+
+   if (detectedType === "unknown") {
+     return NextResponse.json(
+       { error: "Could not detect the form type from this CSV. Please make sure the file is a Google Form response export with the expected column headers." },
+       { status: 400 }
+     );
+   }
+   if (formType === "ambassador" && detectedType === "project") {
+     return NextResponse.json(
+       { error: "This file looks like a Project/Intern form, but you selected Ambassador. Please check your form type selection." },
+       { status: 400 }
+     );
+   }
+   if (formType !== "ambassador" && detectedType === "ambassador") {
+     return NextResponse.json(
+       { error: "This file looks like an Ambassador form, but you selected Project/Intern. Please check your form type selection." },
+       { status: 400 }
+     );
+   }
+
    const cleanData = formType === "ambassador"
      ? normalizeAmbassadorData(rawParsedData, opportunity)
      : normalizeData(rawParsedData, opportunity);

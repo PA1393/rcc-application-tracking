@@ -1,8 +1,16 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Papa from "papaparse";
 
 const ADD_NEW = "__add_new__";
+
+const AMBASSADOR_SIGNALS = [
+  "what position are you applying for?",
+  "enter your #1 ambassador team preference:",
+  "enter your #1 lead ambassador team preference:",
+  "what team(s) are you applying for as an ambassador?",
+];
 
 type ImportSummary = {
   inserted: number;
@@ -27,6 +35,8 @@ export default function ImportButton({
   const [importing, setImporting] = useState(false);
   const [selectedFormType, setSelectedFormType] = useState<"project" | "ambassador">("project");
 
+  const [detectedFormLabel, setDetectedFormLabel] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [errorsExpanded, setErrorsExpanded] = useState(false);
 
@@ -60,8 +70,21 @@ export default function ImportButton({
     setShowNewInput(false);
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setSelectedFile(e.target.files?.[0] ?? null);
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    setSelectedFile(file);
+    setDetectedFormLabel(null);
+
+    if (!file) return;
+
+    // Read just the first row to detect which form the CSV came from
+    const text = await file.text();
+    const result = Papa.parse(text, { header: true, preview: 1 });
+    const headers = (result.meta.fields ?? []).map((h: string) => h.toLowerCase().trim());
+
+    const isAmbassador = AMBASSADOR_SIGNALS.some((s) => headers.includes(s));
+    setSelectedFormType(isAmbassador ? "ambassador" : "project");
+    setDetectedFormLabel(isAmbassador ? "Detected: Ambassador form" : "Detected: Project / Intern form");
   }
 
   async function handleImport() {
@@ -69,6 +92,7 @@ export default function ImportButton({
 
     setImporting(true);
     setSummary(null);
+    setImportError(null);
     setErrorsExpanded(false);
 
     const formData = new FormData();
@@ -78,18 +102,20 @@ export default function ImportButton({
 
     try {
       const res = await fetch("/api/import", { method: "POST", body: formData });
-      const data: ImportSummary = await res.json();
+      const data = await res.json();
 
       if (res.ok) {
-        setSummary(data);
+        setSummary(data as ImportSummary);
         onImportSuccess();
         setSelectedFile(null);
+        setDetectedFormLabel(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
       } else {
-        setSummary({ inserted: 0, updated: 0, skipped: 0, errors: ["Import failed. Please try again."] });
+        // Surface the backend's error message (mismatch errors, 400s, etc.)
+        setImportError((data as { error?: string }).error ?? "Import failed. Please try again.");
       }
     } catch (error) {
-      setSummary({ inserted: 0, updated: 0, skipped: 0, errors: [(error as Error).message] });
+      setImportError((error as Error).message);
     } finally {
       setImporting(false);
     }
@@ -157,6 +183,11 @@ export default function ImportButton({
         </button>
       </div>
 
+      {/* Auto-detect hint — shown after a file is selected */}
+      {detectedFormLabel && (
+        <p className="text-xs text-slate-500">{detectedFormLabel}</p>
+      )}
+
       {/* New opportunity text input — shown below the row */}
       {showNewInput && (
         <input
@@ -169,6 +200,20 @@ export default function ImportButton({
           placeholder="Type opportunity name..."
           className="text-xs border border-teal-500/50 rounded-md px-2 py-1.5 bg-[#1a2035] text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500 w-full"
         />
+      )}
+
+      {/* Import error banner — shown for API-level rejections (e.g. form type mismatch) */}
+      {importError && (
+        <div className="w-full flex items-start justify-between gap-3 rounded-lg border border-red-700/50 bg-red-900/30 px-3 py-2 text-xs text-red-300">
+          <span>{importError}</span>
+          <button
+            onClick={() => setImportError(null)}
+            className="shrink-0 text-red-500 hover:text-red-300 transition-colors leading-none"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
       )}
 
       {/* Import summary banner */}

@@ -183,3 +183,32 @@ export function normalizeAmbassadorData(rawData: any[], opportunity: string): an
     return normalized;
   });
 }
+
+// ── Form type detection ───────────────────────────────────────────────────────
+
+// Headers that only appear on the Ambassador Google Form
+const AMBASSADOR_SIGNALS = [
+  "what position are you applying for?",
+  "enter your #1 ambassador team preference:",
+  "enter your #1 lead ambassador team preference:",
+  "what team(s) are you applying for as an ambassador?",
+];
+
+// Headers that only appear on Project / Intern Google Forms
+const PROJECT_SIGNALS = [
+  "which position are you interested in? details on roles available!",
+  "which project are you applying for?",
+  "select the position youre applying for",
+  "sjsu email address",
+];
+
+export function detectCsvFormType(rawData: any[]): "ambassador" | "project" | "unknown" {
+  if (!rawData.length) return "unknown";
+
+  // Normalise headers from the first row for case-insensitive comparison
+  const headers = Object.keys(rawData[0]).map((h) => h.toLowerCase().trim());
+
+  if (AMBASSADOR_SIGNALS.some((s) => headers.includes(s))) return "ambassador";
+  if (PROJECT_SIGNALS.some((s) => headers.includes(s)))    return "project";
+  return "unknown";
+}

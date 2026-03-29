@@ -1,4 +1,5 @@
 import { canonicalizeTeamName, normalizeAmbassadorData } from "@/lib/parseCsv";
+import { describe, expect, it } from "vitest";
 
 // Reusable base row so individual tests only override what they're testing
 const BASE_AMBASSADOR_ROW = {
