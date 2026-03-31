@@ -98,10 +98,14 @@ function EmailDraftModal({
   app,
   status,
   onSent,
+  canCancel,
+  onCancel,
 }: {
   app: Application;
   status: string;
   onSent: (wasSent: boolean) => void;
+  canCancel: boolean;
+  onCancel: () => Promise<void>;
 }) {
   const template = getEmailTemplate(status, {
     name: app.applicant.name,
@@ -113,9 +117,23 @@ function EmailDraftModal({
   const [subject, setSubject] = useState(template.subject);
   const [body, setBody] = useState(template.body);
   const [sending, setSending] = useState(false);
+  const [canceling, setCanceling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cancelWarning, setCancelWarning] = useState<string | null>(null);
 
   const alreadySentAt = statusToSentAt(status, app);
+
+  async function handleCancel() {
+    if (!canCancel) {
+      setCancelWarning(
+        "Accepted status cannot be canceled because placements have already been processed. Please contact the system administrator."
+      );
+      return;
+    }
+    setCanceling(true);
+    await onCancel();
+    setCanceling(false);
+  }
 
   async function handleSend() {
     setSending(true);
@@ -172,6 +190,13 @@ function EmailDraftModal({
             </div>
           )}
 
+          {/* Cancel warning — shown when reverting Accepted is blocked */}
+          {cancelWarning && (
+            <div className="bg-orange-900/30 border border-orange-600/40 rounded-lg px-4 py-3">
+              <p className="text-sm text-orange-300">{cancelWarning}</p>
+            </div>
+          )}
+
           {/* Send error */}
           {error && (
             <div className="bg-red-900/30 border border-red-600/40 rounded-lg px-4 py-3">
@@ -214,11 +239,18 @@ function EmailDraftModal({
         </div>
 
         {/* Footer */}
-        <div className="p-6 border-t border-slate-700/50 shrink-0">
+        <div className="p-6 border-t border-slate-700/50 shrink-0 flex gap-3">
+          <button
+            onClick={handleCancel}
+            disabled={sending || canceling}
+            className="flex-1 text-sm font-semibold py-2.5 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {canceling ? "Reverting..." : "Cancel"}
+          </button>
           <button
             onClick={handleSend}
-            disabled={sending}
-            className="w-full text-sm font-semibold py-2.5 rounded-lg bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            disabled={sending || canceling}
+            className="flex-1 text-sm font-semibold py-2.5 rounded-lg bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {sending ? "Sending..." : "Send Email"}
           </button>
@@ -261,6 +293,7 @@ function ApplicantModal({
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [changingStatus, setChangingStatus] = useState(false);
   const [emailDraftStatus, setEmailDraftStatus] = useState<string | null>(null);
+  const [previousEmailStatus, setPreviousEmailStatus] = useState<string | null>(null);
   const [toastVisible, setToastVisible] = useState(false);
 
   // Fetch all applications for this applicant
@@ -312,6 +345,8 @@ function ApplicantModal({
     if (!pendingStatus) return;
     setChangingStatus(true);
 
+    const previousStatus = activeApp.status; // capture before PATCH
+
     await fetch("/api/applications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -330,8 +365,25 @@ function ApplicantModal({
 
     // Open email draft for email-eligible statuses
     if ((EMAIL_STATUSES as readonly string[]).includes(confirmedStatus)) {
+      setPreviousEmailStatus(previousStatus);
       setEmailDraftStatus(confirmedStatus);
     }
+  }
+
+  async function handleEmailCancel() {
+    if (!previousEmailStatus) return;
+    await fetch("/api/applications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: activeApp.id, status: previousEmailStatus }),
+    });
+    const reverted = previousEmailStatus;
+    setAllApps((prev) =>
+      prev.map((a) => (a.id === activeApp.id ? { ...a, status: reverted } : a))
+    );
+    onStatusChange(activeApp.id, reverted);
+    setEmailDraftStatus(null);
+    setPreviousEmailStatus(null);
   }
 
   return (
@@ -341,6 +393,8 @@ function ApplicantModal({
         <EmailDraftModal
           app={activeApp}
           status={emailDraftStatus}
+          canCancel={emailDraftStatus !== "Accepted"}
+          onCancel={handleEmailCancel}
           onSent={(wasSent) => {
             setEmailDraftStatus(null);
             if (wasSent) setToastVisible(true);
