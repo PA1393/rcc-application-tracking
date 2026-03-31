@@ -683,11 +683,12 @@ export default function AdminPage() {
     if (!isAmbassadorBoard) setSelectedTeam("All Teams");
   }, [isAmbassadorBoard]);
 
-  // Re-fetches both the opportunity list and the board after a CSV import
+  // Re-fetches both the opportunity list and the board after a CSV import.
+  // Auto-selects the first opportunity when nothing is currently selected (first-ever import).
   const handleImportSuccess = useCallback(() => {
-    fetchOpportunities(false);
+    fetchOpportunities(!selectedOpportunity);
     fetchApps();
-  }, [fetchOpportunities, fetchApps]);
+  }, [fetchOpportunities, fetchApps, selectedOpportunity]);
 
   // Optimistic status update — moves card to new column immediately
   const handleStatusChange = useCallback((id: string, newStatus: string) => {

@@ -51,7 +51,7 @@ export async function POST(request: Request) {
    let skipped = 0;
    
    const errors: string[] = [];
-
+   
    for (const applicant of cleanData) {
      // skip records flagged invalid during normalization
      if ((applicant as any)._invalid) {
