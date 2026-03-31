@@ -101,7 +101,7 @@ function EmailDraftModal({
 }: {
   app: Application;
   status: string;
-  onSent: () => void;
+  onSent: (wasSent: boolean) => void;
 }) {
   const template = getEmailTemplate(status, {
     name: app.applicant.name,
@@ -127,9 +127,11 @@ function EmailDraftModal({
         body: JSON.stringify({ applicationId: app.id, subject, body, to }),
       });
       const data = await res.json();
-      if (res.ok || res.status === 409) {
-        // 409 = already sent (we showed the warning) — still close the modal
-        onSent();
+      if (res.ok) {
+        onSent(true);
+      } else if (res.status === 409) {
+        // 409 = already sent — close modal but don't show success toast
+        onSent(false);
       } else {
         setError(data.error ?? "Failed to send email.");
       }
@@ -339,9 +341,9 @@ function ApplicantModal({
         <EmailDraftModal
           app={activeApp}
           status={emailDraftStatus}
-          onSent={() => {
+          onSent={(wasSent) => {
             setEmailDraftStatus(null);
-            setToastVisible(true);
+            if (wasSent) setToastVisible(true);
             onRefreshBoard();
             // Re-fetch allApps so email history timestamps update in the modal
             fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
@@ -448,7 +450,7 @@ function ApplicantModal({
             {/* Q&A cards */}
             {activeApp.rawData && Object.keys(activeApp.rawData).length > 0 ? (
               <div className="space-y-3">
-                {Object.entries(activeApp.rawData).map(([question, answer]) => (
+                {Object.entries(activeApp.rawData).filter(([key]) => !key.startsWith("_")).map(([question, answer]) => (
                   <div
                     key={question}
                     className="bg-[#0f1117] rounded-lg p-4 border border-slate-700/40"

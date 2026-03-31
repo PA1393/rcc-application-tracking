@@ -65,9 +65,9 @@ export async function POST(request: Request) {
      }
 
      try {
-       await upsertApplicant(applicant);
+       const result = await upsertApplicant(applicant);
        //track if upsert inserted or updated
-       if ((applicant as any)._isNew) {
+       if (result.isNew) {
        inserted++;}
        else{
         updated++;

@@ -25,6 +25,16 @@ export async function upsertApplicant(person: any) {
     });
 
 
+  // Check if the application already exists so we can report inserted vs updated
+  const existingApp = await db.application.findFirst({
+    where: {
+      applicant_id: applicant.id,
+      role: person.role ?? "Unknown",
+      season: person.season ?? "Spring 2025",
+    },
+    select: { id: true },
+  });
+
   const application = await db.application.upsert({
     where: {
       //applicant_id_role_season is a unique constraint that prevents duplicate applications for same person/role/season
@@ -53,7 +63,7 @@ export async function upsertApplicant(person: any) {
     },
   });
 
-  return { applicant, application };
+  return { applicant, application, isNew: !existingApp };
 
 
 }
