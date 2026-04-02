@@ -921,6 +921,10 @@ export default function AdminPage() {
   const [search, setSearch] = useState("");
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [selectedTeam, setSelectedTeam] = useState("All Teams");
+  const [renamingOpportunity, setRenamingOpportunity] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameLoading, setRenameLoading] = useState(false);
 
   // Import opportunity state (lifted from ImportButton)
   const importOpportunity = useImportOpportunity();
@@ -971,6 +975,42 @@ export default function AdminPage() {
       prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
     );
   }, []);
+
+  async function handleRenameSubmit() {
+    const trimmed = renameValue.trim();
+    if (!trimmed) return;
+    if (trimmed === selectedOpportunity) {
+      setRenamingOpportunity(false);
+      setRenameError(null);
+      return;
+    }
+    setRenameLoading(true);
+    setRenameError(null);
+    try {
+      const res = await fetch("/api/opportunities", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldName: selectedOpportunity, newName: trimmed }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRenameError(data.error ?? "Failed to rename.");
+        return;
+      }
+      fetch("/api/applications?opportunities=true")
+        .then((r) => r.json())
+        .catch(() => [])
+        .then((updated: string[]) => {
+          setOpportunities(updated);
+          setSelectedOpportunity(trimmed);
+          setRenamingOpportunity(false);
+        });
+    } catch (e) {
+      setRenameError((e as Error).message);
+    } finally {
+      setRenameLoading(false);
+    }
+  }
 
   const filtered = applications.filter((a) => {
     if (search.trim()) {
@@ -1037,23 +1077,74 @@ export default function AdminPage() {
           borderBottom: "0.5px solid rgba(139,130,190,0.12)",
         }}
       >
-        {/* 1. Board opportunity dropdown */}
-        {opportunities.length > 0 && (
-          <select
-            value={selectedOpportunity}
-            onChange={(e) => setSelectedOpportunity(e.target.value)}
-            className="appearance-none cursor-pointer transition-colors"
-            style={{ ...stripPillStyle, maxWidth: "160px" }}
-          >
-            {opportunities.map((o) => (
-              <option key={o} value={o}>{o}</option>
-            ))}
-          </select>
-        )}
-        {opportunities.length === 0 && (
+        {/* 1. Board opportunity dropdown / inline rename */}
+        {opportunities.length === 0 ? (
           <span style={{ ...stripPillStyle, color: "#6A6580", cursor: "default" }}>
             No opportunities
           </span>
+        ) : renamingOpportunity ? (
+          <div className="flex items-center gap-1">
+            <input
+              type="text"
+              value={renameValue}
+              autoFocus
+              onChange={(e) => { setRenameValue(e.target.value); setRenameError(null); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleRenameSubmit();
+                if (e.key === "Escape") { setRenamingOpportunity(false); setRenameError(null); }
+              }}
+              className="transition-colors"
+              style={{ ...stripPillStyle, width: 160 }}
+            />
+            <button
+              onClick={handleRenameSubmit}
+              disabled={renameLoading}
+              className="transition-colors disabled:opacity-50"
+              style={{ background: "#6B5FCC", color: "#EAE8F2", border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 12, cursor: "pointer" }}
+            >
+              {renameLoading ? "..." : "Save"}
+            </button>
+            <button
+              onClick={() => { setRenamingOpportunity(false); setRenameError(null); }}
+              style={{ background: "transparent", border: "none", color: "#A09BB5", fontSize: 12, cursor: "pointer", padding: "5px 6px" }}
+            >
+              ✕
+            </button>
+            {renameError && (
+              <span
+                className="absolute pointer-events-none"
+                style={{ top: "calc(100% + 2px)", left: 20, fontSize: 11, color: "#F06060", whiteSpace: "nowrap" }}
+              >
+                {renameError}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <select
+              value={selectedOpportunity}
+              onChange={(e) => setSelectedOpportunity(e.target.value)}
+              className="appearance-none cursor-pointer transition-colors"
+              style={{ ...stripPillStyle, maxWidth: "160px" }}
+            >
+              {opportunities.map((o) => (
+                <option key={o} value={o}>{o}</option>
+              ))}
+            </select>
+            {selectedOpportunity && (
+              <button
+                onClick={() => { setRenameValue(selectedOpportunity); setRenamingOpportunity(true); setRenameError(null); }}
+                title="Rename opportunity"
+                style={{ background: "transparent", border: "none", color: "#6A6580", cursor: "pointer", padding: "4px", lineHeight: 1, display: "flex", alignItems: "center" }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#6A6580"; }}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M8.5 1.5L10.5 3.5L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            )}
+          </div>
         )}
 
         {/* 2. Ambassador team filter (only when ambassador board) */}
