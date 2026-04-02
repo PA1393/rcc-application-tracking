@@ -55,10 +55,10 @@ export async function GET(request: Request) {
   return NextResponse.json(applications);
 }
 
-// PATCH /api/applications  body: { id, status?, interview_notes? }
+// PATCH /api/applications  body: { id, status?, interview_notes?, application_notes?, decision_notes? }
 export async function PATCH(request: Request) {
   const body = await request.json();
-  const { id, status, interview_notes } = body;
+  const { id, status, interview_notes, application_notes, decision_notes } = body;
 
   if (!id) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
@@ -72,6 +72,8 @@ export async function PATCH(request: Request) {
           data: {
             ...(status !== undefined && { status }),
             ...(interview_notes !== undefined && { interview_notes }),
+            ...(application_notes !== undefined && { application_notes }),
+            ...(decision_notes !== undefined && { decision_notes }),
           },
         });
 

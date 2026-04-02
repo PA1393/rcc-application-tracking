@@ -34,7 +34,9 @@ model Application{
   status                  String  //Applied / Interviewing / Accepted / Rejected / Waitlisted / Closed
   season                  String
 
-  interview_notes         String? @db.Text 
+  interview_notes         String? @db.Text
+  application_notes       String? @db.Text
+  decision_notes          String? @db.Text
 
   rawData                 Json?  //stores the raw responses
 

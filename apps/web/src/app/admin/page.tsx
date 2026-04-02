@@ -15,7 +15,9 @@ type Application = {
   status: string;
   season: string;
   applied_at: string;
+  application_notes: string | null;
   interview_notes: string | null;
+  decision_notes: string | null;
   interview_invite_sent: string | null;
   acceptance_sent_at: string | null;
   rejection_sent_at: string | null;
@@ -91,6 +93,31 @@ const AMBASSADOR_TEAMS = [
   "Web Development Team",
   "Growth Analytics Team",
 ] as const;
+
+// ── Notes tab helpers ─────────────────────────────────────────────────────────
+
+type NoteField = "application_notes" | "interview_notes" | "decision_notes";
+
+const NOTE_TABS: { field: NoteField; label: string; placeholder: string }[] = [
+  { field: "application_notes", label: "Application Notes", placeholder: "Add notes about this application..." },
+  { field: "interview_notes",   label: "Interview Notes",   placeholder: "Add notes from the interview..." },
+  { field: "decision_notes",    label: "Decision Notes",    placeholder: "Add reasoning for the final decision..." },
+];
+
+/** Returns the note fields whose tabs should be visible for the given application. */
+function visibleNoteFields(app: Application): NoteField[] {
+  const s = app.status;
+  return NOTE_TABS
+    .filter(({ field }) => {
+      if (field === "application_notes") return true;
+      if (field === "interview_notes") {
+        return ["Interviewing", "Accepted", "Rejected"].includes(s) || !!app.interview_notes?.trim();
+      }
+      // decision_notes
+      return ["Accepted", "Rejected"].includes(s) || !!app.decision_notes?.trim();
+    })
+    .map(({ field }) => field);
+}
 
 // ── Email Draft Modal ─────────────────────────────────────────────────────────
 
@@ -288,7 +315,12 @@ function ApplicantModal({
 }) {
   const [allApps, setAllApps] = useState<Application[]>([initialApp]);
   const [activeTab, setActiveTab] = useState(initialApp.id);
-  const [notes, setNotes] = useState(initialApp.interview_notes ?? "");
+  const [activeNotesTab, setActiveNotesTab] = useState<NoteField>("application_notes");
+  const [noteDrafts, setNoteDrafts] = useState({
+    application_notes: initialApp.application_notes ?? "",
+    interview_notes:   initialApp.interview_notes   ?? "",
+    decision_notes:    initialApp.decision_notes    ?? "",
+  });
   const [savingNotes, setSavingNotes] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [changingStatus, setChangingStatus] = useState(false);
@@ -303,10 +335,16 @@ function ApplicantModal({
       .then((data: Application[]) => setAllApps(data));
   }, [initialApp.applicant_id]);
 
-  // Sync notes textarea when switching tabs or when allApps loads
+  // Sync note drafts when switching application tabs or when allApps reloads.
+  // Always resets to the Application Notes tab on application tab switch.
   useEffect(() => {
     const app = allApps.find((a) => a.id === activeTab) ?? initialApp;
-    setNotes(app.interview_notes ?? "");
+    setActiveNotesTab("application_notes");
+    setNoteDrafts({
+      application_notes: app.application_notes ?? "",
+      interview_notes:   app.interview_notes   ?? "",
+      decision_notes:    app.decision_notes    ?? "",
+    });
   }, [activeTab, allApps]);
 
   // Auto-dismiss toast after 3 seconds
@@ -331,12 +369,16 @@ function ApplicantModal({
 
   const activeApp = allApps.find((a) => a.id === activeTab) ?? initialApp;
 
+  // Which note tabs to show for the current application, and which one is active
+  const visibleFields = visibleNoteFields(activeApp);
+  const activeField: NoteField = visibleFields.includes(activeNotesTab) ? activeNotesTab : "application_notes";
+
   async function saveNotes() {
     setSavingNotes(true);
     await fetch("/api/applications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: activeApp.id, interview_notes: notes }),
+      body: JSON.stringify({ id: activeApp.id, [activeField]: noteDrafts[activeField] }),
     });
     setSavingNotes(false);
   }
@@ -520,17 +562,36 @@ function ApplicantModal({
               <p className="text-sm text-slate-600 italic">No form responses recorded.</p>
             )}
 
-            {/* Notes */}
+            {/* Notes — tabbed: Application / Interview / Decision */}
             <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                Interview Notes
-              </p>
+              {/* Tab pills */}
+              <div className="flex gap-1 mb-2">
+                {visibleFields.map((field) => {
+                  const tab = NOTE_TABS.find((t) => t.field === field)!;
+                  return (
+                    <button
+                      key={field}
+                      onClick={() => setActiveNotesTab(field)}
+                      className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
+                        activeField === field
+                          ? "bg-teal-600/30 text-teal-300 border border-teal-600/50"
+                          : "text-slate-500 hover:text-slate-300 border border-transparent"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Textarea for the active note field */}
               <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                value={noteDrafts[activeField]}
+                onChange={(e) =>
+                  setNoteDrafts((prev) => ({ ...prev, [activeField]: e.target.value }))
+                }
                 onBlur={saveNotes}
                 rows={4}
-                placeholder="Add notes..."
+                placeholder={NOTE_TABS.find((t) => t.field === activeField)!.placeholder}
                 className="w-full text-sm bg-[#0f1117] border border-slate-700 text-slate-200 placeholder-slate-600 rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-teal-500"
               />
               {savingNotes && (
