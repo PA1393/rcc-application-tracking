@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import ImportButton from "@/components/importButton";
+import ImportButton, {
+  useImportOpportunity,
+} from "@/components/importButton";
 import { getEmailTemplate } from "@/lib/emailTemplates";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -28,24 +30,36 @@ type Application = {
 const STATUSES = ["To Review", "Interviewing", "Rejected", "Accepted"] as const;
 type Status = (typeof STATUSES)[number];
 
+// ── Color system CSS vars applied inline ─────────────────────────────────────
+// Page base:     #0C0A14
+// Surface:       #141120
+// Card:          #1C1930
+// Elevated:      #242040
+// Brand purple:  #8B7FEE
+// Brand dim:     #6B5FCC
+// Text primary:  #EAE8F2
+// Text secondary:#A09BB5
+// Text muted:    #6A6580
+// Border:        rgba(139,130,190,0.12)
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function statusColor(status: string) {
   switch (status) {
-    case "To Review":    return "bg-slate-700 text-slate-200";
-    case "Interviewing": return "bg-blue-900/60 text-blue-300";
-    case "Accepted":     return "bg-teal-900/60 text-teal-300";
-    case "Rejected":     return "bg-red-900/40 text-red-400";
-    default:             return "bg-slate-700 text-slate-300";
+    case "To Review":    return { background: "rgba(107,158,247,0.12)", color: "#6B9EF7" };
+    case "Interviewing": return { background: "rgba(240,176,64,0.12)",  color: "#F0B040" };
+    case "Accepted":     return { background: "rgba(74,222,128,0.12)",  color: "#4ADE80" };
+    case "Rejected":     return { background: "rgba(240,96,96,0.12)",   color: "#F06060" };
+    default:             return { background: "rgba(160,155,181,0.12)", color: "#A09BB5" };
   }
 }
 
-function columnAccent(status: Status) {
+function columnBarColor(status: Status): string {
   switch (status) {
-    case "To Review":    return "border-t-slate-500";
-    case "Interviewing": return "border-t-blue-500";
-    case "Accepted":     return "border-t-teal-400";
-    case "Rejected":     return "border-t-red-500";
+    case "To Review":    return "#6B9EF7";
+    case "Interviewing": return "#F0B040";
+    case "Accepted":     return "#4ADE80";
+    case "Rejected":     return "#F06060";
   }
 }
 
@@ -68,7 +82,6 @@ function getInitials(name: string) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/** Returns the timestamp field value for the email associated with a given status. */
 function statusToSentAt(status: string, app: Application): string | null {
   switch (status) {
     case "Interviewing": return app.interview_invite_sent;
@@ -104,7 +117,6 @@ const NOTE_TABS: { field: NoteField; label: string; placeholder: string }[] = [
   { field: "decision_notes",    label: "Decision Notes",    placeholder: "Add reasoning for the final decision..." },
 ];
 
-/** Returns the note fields whose tabs should be visible for the given application. */
 function visibleNoteFields(app: Application): NoteField[] {
   const s = app.status;
   return NOTE_TABS
@@ -113,11 +125,19 @@ function visibleNoteFields(app: Application): NoteField[] {
       if (field === "interview_notes") {
         return ["Interviewing", "Accepted", "Rejected"].includes(s) || !!app.interview_notes?.trim();
       }
-      // decision_notes
       return ["Accepted", "Rejected"].includes(s) || !!app.decision_notes?.trim();
     })
     .map(({ field }) => field);
 }
+
+// ── Shared input style for modals ────────────────────────────────────────────
+const modalInputCls =
+  "w-full text-sm rounded-[8px] px-3 py-2 focus:outline-none transition-colors";
+const modalInputStyle: React.CSSProperties = {
+  background: "#1C1930",
+  border: "0.5px solid rgba(139,130,190,0.12)",
+  color: "#EAE8F2",
+};
 
 // ── Email Draft Modal ─────────────────────────────────────────────────────────
 
@@ -175,7 +195,6 @@ function EmailDraftModal({
       if (res.ok) {
         onSent(true);
       } else if (res.status === 409) {
-        // 409 = already sent — close modal but don't show success toast
         onSent(false);
       } else {
         setError(data.error ?? "Failed to send email.");
@@ -190,26 +209,33 @@ function EmailDraftModal({
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-      style={{ backgroundColor: "rgba(0,0,0,0.85)", backdropFilter: "blur(4px)" }}
+      style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
     >
-      <div className="bg-[#131929] rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-700/50 shadow-2xl">
-
+      <div
+        className="w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl"
+        style={{ background: "#141120", border: "0.5px solid rgba(139,130,190,0.12)", borderRadius: 12 }}
+      >
         {/* Header */}
-        <div className="p-6 border-b border-slate-700/50 shrink-0">
-          <h3 className="text-base font-bold text-white">Send Email — {status}</h3>
-          <p className="text-sm text-slate-400 mt-0.5">
-            Review and send email to{" "}
-            <span className="text-slate-200">{app.applicant.name}</span>
+        <div className="px-6 py-5 shrink-0" style={{ borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: "#EAE8F2", lineHeight: 1.3 }}>Send Email — {status}</h3>
+          <p className="mt-0.5" style={{ fontSize: 13, color: "#6A6580" }}>
+            To: <span style={{ color: "#A09BB5" }}>{app.applicant.name}</span>
           </p>
         </div>
 
         {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
           {/* Already-sent warning */}
           {alreadySentAt && (
-            <div className="bg-yellow-900/30 border border-yellow-600/40 rounded-lg px-4 py-3">
-              <p className="text-sm text-yellow-300">
+            <div
+              className="px-4 py-3"
+              style={{
+                background: "rgba(240,176,64,0.08)",
+                borderLeft: "3px solid #F0B040",
+                borderRadius: 6,
+              }}
+            >
+              <p style={{ fontSize: 13, color: "#F0B040" }}>
                 An email was already sent for this status on{" "}
                 <span className="font-semibold">{formatDate(alreadySentAt)}</span>.
                 Sending again will not update the timestamp.
@@ -217,67 +243,89 @@ function EmailDraftModal({
             </div>
           )}
 
-          {/* Cancel warning — shown when reverting Accepted is blocked */}
+          {/* Cancel-blocked warning */}
           {cancelWarning && (
-            <div className="bg-orange-900/30 border border-orange-600/40 rounded-lg px-4 py-3">
-              <p className="text-sm text-orange-300">{cancelWarning}</p>
+            <div
+              className="px-4 py-3"
+              style={{
+                background: "rgba(240,176,64,0.08)",
+                borderLeft: "3px solid #F0B040",
+                borderRadius: 6,
+              }}
+            >
+              <p style={{ fontSize: 13, color: "#F0B040" }}>{cancelWarning}</p>
             </div>
           )}
 
           {/* Send error */}
           {error && (
-            <div className="bg-red-900/30 border border-red-600/40 rounded-lg px-4 py-3">
-              <p className="text-sm text-red-300">{error}</p>
+            <div
+              className="px-4 py-3"
+              style={{
+                background: "rgba(240,96,96,0.08)",
+                borderLeft: "3px solid #F06060",
+                borderRadius: 6,
+              }}
+            >
+              <p style={{ fontSize: 13, color: "#F06060" }}>{error}</p>
             </div>
           )}
 
-          {/* To (editable) */}
           <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">To</p>
+            <p className="mb-1.5 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>To</p>
             <input
               type="email"
               value={to}
               onChange={(e) => setTo(e.target.value)}
-              className="w-full text-sm bg-[#0f1117] border border-slate-700 text-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className={modalInputCls}
+              style={modalInputStyle}
+              onFocus={(e) => { e.currentTarget.style.borderColor = "#6B5FCC"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(139,130,190,0.12)"; }}
             />
           </div>
 
-          {/* Subject */}
           <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Subject</p>
+            <p className="mb-1.5 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>Subject</p>
             <input
               type="text"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              className="w-full text-sm bg-[#0f1117] border border-slate-700 text-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className={modalInputCls}
+              style={modalInputStyle}
+              onFocus={(e) => { e.currentTarget.style.borderColor = "#6B5FCC"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(139,130,190,0.12)"; }}
             />
           </div>
 
-          {/* Body */}
           <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Body</p>
+            <p className="mb-1.5 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>Body</p>
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={12}
-              className="w-full text-sm bg-[#0f1117] border border-slate-700 text-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className={`${modalInputCls} resize-none`}
+              style={{ ...modalInputStyle, color: "#EAE8F2" }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = "#6B5FCC"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(139,130,190,0.12)"; }}
             />
           </div>
         </div>
 
         {/* Footer */}
-        <div className="p-6 border-t border-slate-700/50 shrink-0 flex gap-3">
+        <div className="px-6 py-4 shrink-0 flex gap-3" style={{ borderTop: "0.5px solid rgba(139,130,190,0.08)" }}>
           <button
             onClick={handleCancel}
             disabled={sending || canceling}
-            className="flex-1 text-sm font-semibold py-2.5 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex-1 text-sm font-medium py-2.5 rounded-[8px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ border: "0.5px solid rgba(139,130,190,0.12)", color: "#A09BB5", background: "transparent" }}
           >
             {canceling ? "Reverting..." : "Cancel"}
           </button>
           <button
             onClick={handleSend}
             disabled={sending || canceling}
-            className="flex-1 text-sm font-semibold py-2.5 rounded-lg bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex-1 text-sm font-medium py-2.5 rounded-[8px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: "#6B5FCC", color: "#EAE8F2" }}
           >
             {sending ? "Sending..." : "Send Email"}
           </button>
@@ -291,14 +339,17 @@ function EmailDraftModal({
 
 const ACTION_STATUSES = ["Interviewing", "Accepted", "Rejected"] as const;
 
-function statusButtonStyle(status: string) {
-  switch (status) {
-    case "Interviewing": return "bg-blue-800/60 text-blue-200 hover:bg-blue-700/60 border border-blue-700/50";
-    case "Accepted":     return "bg-teal-800/60 text-teal-200 hover:bg-teal-700/60 border border-teal-700/50";
-    case "Rejected":     return "bg-red-800/40 text-red-300 hover:bg-red-700/40 border border-red-700/40";
-    default:             return "bg-slate-700 text-slate-300 hover:bg-slate-600 border border-slate-600";
-  }
-}
+// All status-change buttons share a neutral base; hover is handled inline
+const statusButtonBase: React.CSSProperties = {
+  background: "#1C1930",
+  border: "0.5px solid rgba(139,130,190,0.12)",
+  borderRadius: 8,
+  padding: "8px 16px",
+  fontSize: 12,
+  color: "#A09BB5",
+  cursor: "pointer",
+  transition: "border-color 0.15s, color 0.15s",
+};
 
 function ApplicantModal({
   initialApp,
@@ -328,15 +379,12 @@ function ApplicantModal({
   const [previousEmailStatus, setPreviousEmailStatus] = useState<string | null>(null);
   const [toastVisible, setToastVisible] = useState(false);
 
-  // Fetch all applications for this applicant
   useEffect(() => {
     fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
       .then((r) => r.json())
       .then((data: Application[]) => setAllApps(data));
   }, [initialApp.applicant_id]);
 
-  // Sync note drafts when switching application tabs or when allApps reloads.
-  // Always resets to the Application Notes tab on application tab switch.
   useEffect(() => {
     const app = allApps.find((a) => a.id === activeTab) ?? initialApp;
     setActiveNotesTab("application_notes");
@@ -347,18 +395,16 @@ function ApplicantModal({
     });
   }, [activeTab, allApps]);
 
-  // Auto-dismiss toast after 3 seconds
   useEffect(() => {
     if (!toastVisible) return;
     const timer = setTimeout(() => setToastVisible(false), 3000);
     return () => clearTimeout(timer);
   }, [toastVisible]);
 
-  // Close on Escape — suppressed when email draft or confirmation is open
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (emailDraftStatus) return; // email modal has no dismiss
+        if (emailDraftStatus) return;
         if (pendingStatus) setPendingStatus(null);
         else onClose();
       }
@@ -368,8 +414,6 @@ function ApplicantModal({
   }, [onClose, pendingStatus, emailDraftStatus]);
 
   const activeApp = allApps.find((a) => a.id === activeTab) ?? initialApp;
-
-  // Which note tabs to show for the current application, and which one is active
   const visibleFields = visibleNoteFields(activeApp);
   const activeField: NoteField = visibleFields.includes(activeNotesTab) ? activeNotesTab : "application_notes";
 
@@ -387,7 +431,7 @@ function ApplicantModal({
     if (!pendingStatus) return;
     setChangingStatus(true);
 
-    const previousStatus = activeApp.status; // capture before PATCH
+    const previousStatus = activeApp.status;
 
     await fetch("/api/applications", {
       method: "PATCH",
@@ -397,7 +441,6 @@ function ApplicantModal({
 
     const confirmedStatus = pendingStatus;
 
-    // Optimistically update local allApps so the badge reflects the change
     setAllApps((prev) =>
       prev.map((a) => (a.id === activeApp.id ? { ...a, status: confirmedStatus } : a))
     );
@@ -405,7 +448,6 @@ function ApplicantModal({
     setPendingStatus(null);
     setChangingStatus(false);
 
-    // Open email draft for email-eligible statuses
     if ((EMAIL_STATUSES as readonly string[]).includes(confirmedStatus)) {
       setPreviousEmailStatus(previousStatus);
       setEmailDraftStatus(confirmedStatus);
@@ -428,9 +470,10 @@ function ApplicantModal({
     setPreviousEmailStatus(null);
   }
 
+  const activeStatusColor = statusColor(activeApp.status);
+
   return (
     <>
-      {/* Email draft modal — rendered above the applicant modal */}
       {emailDraftStatus && (
         <EmailDraftModal
           app={activeApp}
@@ -441,7 +484,6 @@ function ApplicantModal({
             setEmailDraftStatus(null);
             if (wasSent) setToastVisible(true);
             onRefreshBoard();
-            // Re-fetch allApps so email history timestamps update in the modal
             fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
               .then((r) => r.json())
               .then((data: Application[]) => setAllApps(data));
@@ -451,44 +493,61 @@ function ApplicantModal({
 
       {/* Success toast */}
       {toastVisible && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-teal-700 text-white text-sm font-medium px-5 py-2.5 rounded-full shadow-lg">
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] text-sm font-medium px-5 py-2.5 shadow-lg"
+          style={{
+            background: "rgba(74,222,128,0.12)",
+            color: "#4ADE80",
+            borderRadius: 8,
+            border: "0.5px solid rgba(74,222,128,0.25)",
+          }}
+        >
           Email sent successfully
         </div>
       )}
 
-      {/* Backdrop — click outside to close (suppressed while email draft is open) */}
+      {/* Backdrop */}
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
+        className="rcc-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
         onClick={() => { if (!pendingStatus && !emailDraftStatus) onClose(); }}
       >
-        {/* Modal panel — stop propagation */}
+        {/* Modal panel */}
         <div
-          className="relative bg-[#131929] rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col border border-slate-700/50 shadow-2xl"
+          className="rcc-modal-panel relative w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl"
+          style={{ background: "#141120", border: "0.5px solid rgba(139,130,190,0.12)", borderRadius: 12 }}
           onClick={(e) => e.stopPropagation()}
         >
 
           {/* Confirmation overlay */}
           {pendingStatus && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-black/60 backdrop-blur-sm">
-              <div className="bg-[#1a2035] border border-slate-700 rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl">
-                <p className="text-white text-sm leading-relaxed mb-5">
-                  Are you sure you want to change{" "}
-                  <span className="text-teal-300 font-semibold">{initialApp.applicant.name}</span>'s
+            <div
+              className="absolute inset-0 z-10 flex items-center justify-center"
+              style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", borderRadius: 12 }}
+            >
+              <div
+                className="p-6 max-w-sm w-full mx-4 shadow-2xl"
+                style={{ background: "#1C1930", border: "0.5px solid rgba(139,130,190,0.12)", borderRadius: 10 }}
+              >
+                <p className="leading-relaxed mb-5" style={{ fontSize: 13, color: "#EAE8F2" }}>
+                  Change{" "}
+                  <span style={{ color: "#8B7FEE", fontWeight: 600 }}>{initialApp.applicant.name}</span>'s
                   status to{" "}
-                  <span className="font-bold">{pendingStatus}</span>?
+                  <span style={{ fontWeight: 600, color: "#EAE8F2" }}>{pendingStatus}</span>?
                 </p>
                 <div className="flex gap-2 justify-end">
                   <button
                     onClick={() => setPendingStatus(null)}
-                    className="text-sm px-4 py-1.5 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors"
+                    className="px-4 py-1.5 rounded-[8px] transition-colors"
+                    style={{ fontSize: 12, border: "0.5px solid rgba(139,130,190,0.12)", color: "#A09BB5", background: "transparent" }}
                   >
                     Cancel
                   </button>
                   <button
                     onClick={confirmStatusChange}
                     disabled={changingStatus}
-                    className="text-sm px-4 py-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
+                    className="px-4 py-1.5 rounded-[8px] transition-colors disabled:opacity-50"
+                    style={{ fontSize: 12, background: "#6B5FCC", color: "#EAE8F2" }}
                   >
                     {changingStatus ? "Saving..." : "Confirm"}
                   </button>
@@ -498,110 +557,149 @@ function ApplicantModal({
           )}
 
           {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-slate-700/50">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-teal-500/20 border border-teal-500/30 flex items-center justify-center shrink-0">
-                <span className="text-sm font-semibold text-teal-300">
+          <div
+            className="flex items-center justify-between px-6 py-5 shrink-0"
+            style={{ borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+                style={{ background: "linear-gradient(135deg, #6B5FCC, #D4537E)" }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#EAE8F2" }}>
                   {getInitials(initialApp.applicant.name)}
                 </span>
               </div>
-              <div>
-                <h2 className="text-lg font-bold text-white leading-tight">
+              <div className="min-w-0">
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: "#EAE8F2", lineHeight: 1.2 }}>
                   {initialApp.applicant.name}
                 </h2>
-                <p className="text-sm text-slate-400">{initialApp.applicant.email}</p>
+                <p style={{ fontSize: 13, color: "#6A6580", lineHeight: 1.3 }}>{initialApp.applicant.email}</p>
               </div>
-              <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statusColor(activeApp.status)}`}>
+              <span
+                className="shrink-0 px-2.5 py-1 rounded-full"
+                style={{ fontSize: 11, fontWeight: 500, ...activeStatusColor }}
+              >
                 {activeApp.status}
               </span>
             </div>
             <button
               onClick={onClose}
-              className="text-slate-500 hover:text-slate-200 transition-colors text-lg leading-none ml-4"
+              className="shrink-0 ml-4 leading-none transition-colors"
+              style={{ fontSize: 16, color: "#6A6580" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#6A6580"; }}
             >
               ✕
             </button>
           </div>
 
-          {/* Tabs */}
-          <div className="flex gap-1 px-6 pt-3 border-b border-slate-700/50">
+          {/* Role / opportunity tabs */}
+          <div
+            className="flex gap-1 px-6 pt-3 pb-0 shrink-0"
+            style={{ borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}
+          >
             {allApps.map((a) => (
               <button
                 key={a.id}
                 onClick={() => setActiveTab(a.id)}
-                className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 -mb-px ${
-                  activeTab === a.id
-                    ? "text-teal-300 border-teal-400 bg-[#0f1117]/40"
-                    : "text-slate-500 border-transparent hover:text-slate-300"
-                }`}
+                className="-mb-px px-3 py-1.5 transition-colors"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  borderRadius: "6px 6px 0 0",
+                  ...(activeTab === a.id
+                    ? { background: "rgba(139,127,238,0.15)", color: "#8B7FEE" }
+                    : { background: "transparent", color: "#A09BB5" }),
+                }}
+                onMouseEnter={(e) => {
+                  if (activeTab !== a.id) (e.currentTarget as HTMLButtonElement).style.background = "#1C1930";
+                }}
+                onMouseLeave={(e) => {
+                  if (activeTab !== a.id) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                }}
               >
                 {a.opportunity === boardOpportunity ? a.role : a.opportunity}
               </button>
             ))}
           </div>
 
-          {/* Scrollable tab content */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
-            {/* Q&A cards */}
+            {/* Q&A section — divider-separated, no card boxes */}
             {activeApp.rawData && Object.keys(activeApp.rawData).length > 0 ? (
-              <div className="space-y-3">
-                {Object.entries(activeApp.rawData).filter(([key]) => !key.startsWith("_")).map(([question, answer]) => (
-                  <div
-                    key={question}
-                    className="bg-[#0f1117] rounded-lg p-4 border border-slate-700/40"
-                  >
-                    <p className="text-xs text-slate-500 mb-1">{question}</p>
-                    <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">
-                      {String(answer) || "—"}
-                    </p>
-                  </div>
-                ))}
+              <div>
+                {Object.entries(activeApp.rawData)
+                  .filter(([key]) => !key.startsWith("_"))
+                  .map(([question, answer], i, arr) => (
+                    <div
+                      key={question}
+                      className="py-3"
+                      style={i < arr.length - 1 ? { borderBottom: "0.5px solid rgba(139,130,190,0.08)" } : {}}
+                    >
+                      <p className="mb-1 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
+                        {question}
+                      </p>
+                      <p className="whitespace-pre-wrap leading-relaxed" style={{ fontSize: 13, color: "#EAE8F2" }}>
+                        {String(answer) || "—"}
+                      </p>
+                    </div>
+                  ))}
               </div>
             ) : (
-              <p className="text-sm text-slate-600 italic">No form responses recorded.</p>
+              <p style={{ fontSize: 13, color: "#6A6580", fontStyle: "italic" }}>No form responses recorded.</p>
             )}
 
-            {/* Notes — tabbed: Application / Interview / Decision */}
+            {/* Notes — tabbed */}
             <div>
-              {/* Tab pills */}
-              <div className="flex gap-1 mb-2">
+              <div className="flex gap-1 mb-2.5">
                 {visibleFields.map((field) => {
                   const tab = NOTE_TABS.find((t) => t.field === field)!;
+                  const isActive = activeField === field;
                   return (
                     <button
                       key={field}
                       onClick={() => setActiveNotesTab(field)}
-                      className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
-                        activeField === field
-                          ? "bg-teal-600/30 text-teal-300 border border-teal-600/50"
-                          : "text-slate-500 hover:text-slate-300 border border-transparent"
-                      }`}
+                      className="px-3 py-1 transition-colors"
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 500,
+                        borderRadius: 6,
+                        ...(isActive
+                          ? { background: "rgba(139,127,238,0.15)", color: "#8B7FEE" }
+                          : { background: "transparent", color: "#A09BB5" }),
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "#1C1930";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                      }}
                     >
                       {tab.label}
                     </button>
                   );
                 })}
               </div>
-              {/* Textarea for the active note field */}
               <textarea
                 value={noteDrafts[activeField]}
-                onChange={(e) =>
-                  setNoteDrafts((prev) => ({ ...prev, [activeField]: e.target.value }))
-                }
+                onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [activeField]: e.target.value }))}
                 onBlur={saveNotes}
                 rows={4}
                 placeholder={NOTE_TABS.find((t) => t.field === activeField)!.placeholder}
-                className="w-full text-sm bg-[#0f1117] border border-slate-700 text-slate-200 placeholder-slate-600 rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-teal-500"
+                className={`${modalInputCls} resize-none`}
+                style={{ ...modalInputStyle, fontSize: 13, lineHeight: "1.6" }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = "#6B5FCC"; }}
               />
               {savingNotes && (
-                <p className="text-xs text-slate-500 mt-1">Saving...</p>
+                <p className="mt-1" style={{ fontSize: 11, color: "#6A6580" }}>Saving...</p>
               )}
             </div>
 
             {/* Change Status */}
             <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
                 Change Status
               </p>
               <div className="flex gap-2 flex-wrap">
@@ -609,7 +707,15 @@ function ApplicantModal({
                   <button
                     key={s}
                     onClick={() => setPendingStatus(s)}
-                    className={`text-sm px-4 py-1.5 rounded-lg font-medium transition-colors ${statusButtonStyle(s)}`}
+                    style={statusButtonBase}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = "#6B5FCC";
+                      (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(139,130,190,0.12)";
+                      (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5";
+                    }}
                   >
                     {s}
                   </button>
@@ -633,18 +739,18 @@ function ApplicantModal({
               if (rows.length === 0) return null;
               return (
                 <div>
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                  <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
                     Email History
                   </p>
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {rows.map(({ label, sentAt }) => (
                       <div key={label} className="flex items-center gap-2">
-                        <span className={`text-sm ${sentAt ? "text-teal-400" : "text-slate-600"}`}>✉</span>
-                        <span className="text-xs text-slate-400">{label}</span>
+                        <span style={{ fontSize: 12, color: sentAt ? "#4ADE80" : "#6A6580" }}>✉</span>
+                        <span style={{ fontSize: 12, color: "#A09BB5" }}>{label}</span>
                         {sentAt ? (
-                          <span className="text-xs text-teal-400 ml-auto">{formatDateTime(sentAt)}</span>
+                          <span className="ml-auto" style={{ fontSize: 12, color: "#4ADE80" }}>{formatDateTime(sentAt)}</span>
                         ) : (
-                          <span className="text-xs text-slate-600 ml-auto">not sent</span>
+                          <span className="ml-auto" style={{ fontSize: 12, color: "#6A6580" }}>not sent</span>
                         )}
                       </div>
                     ))}
@@ -652,7 +758,6 @@ function ApplicantModal({
                 </div>
               );
             })()}
-
           </div>
         </div>
       </div>
@@ -669,45 +774,73 @@ function ApplicantCard({
   app: Application;
   onOpen: (app: Application) => void;
 }) {
+  const emailSent = !!(EMAIL_STATUSES as readonly string[]).includes(app.status) && !!statusToSentAt(app.status, app);
+  const showEmail = (EMAIL_STATUSES as readonly string[]).includes(app.status);
+
+  function handleCardClick(e: React.MouseEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    el.classList.remove("rcc-card-press");
+    // Force reflow so removing + re-adding restarts animation
+    void el.offsetWidth;
+    el.classList.add("rcc-card-press");
+    onOpen(app);
+  }
+
   return (
     <div
-      className="bg-[#1a2035] border border-slate-700/50 rounded-lg hover:border-slate-600 transition-colors cursor-pointer select-none"
-      onClick={() => onOpen(app)}
+      className="rounded-[8px] cursor-pointer select-none flex items-center gap-3"
+      style={{
+        background: "#1C1930",
+        border: "0.5px solid rgba(139,130,190,0.12)",
+        padding: "10px 12px",
+        transition: "border-color 0.15s",
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "#6B5FCC"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(139,130,190,0.12)"; }}
+      onClick={handleCardClick}
     >
-      <div className="p-4">
-        <div className="flex items-start gap-3">
-          {/* Avatar */}
-          <div className="shrink-0 w-9 h-9 rounded-full bg-teal-500/20 border border-teal-500/30 flex items-center justify-center">
-            <span className="text-xs font-semibold text-teal-300">
-              {getInitials(app.applicant.name)}
-            </span>
-          </div>
-
-          {/* Info */}
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-slate-100 truncate text-sm">{app.applicant.name}</p>
-            <p className="text-xs text-slate-400 truncate">{app.applicant.email}</p>
-            {app.track === "Ambassador" && app.rawData?._teamPreference1 && (
-              <p className="text-xs text-slate-500 truncate">Prefers: {app.rawData._teamPreference1}</p>
-            )}
-            <p className="text-xs text-slate-500 mt-1">Applied {formatDate(app.applied_at)}</p>
-          </div>
-        </div>
-
-        {/* Status badge + mail indicator */}
-        <div className="mt-3 flex items-center justify-between">
-          <span className={`text-xs font-medium px-2 py-0.5 rounded ${statusColor(app.status)}`}>
-            {app.status}
-          </span>
-          {(EMAIL_STATUSES as readonly string[]).includes(app.status) && (
-            <span className={`flex items-center gap-1 text-xs ${
-              statusToSentAt(app.status, app) ? "text-teal-400" : "text-slate-600"
-            }`}>
-              ✉ {statusToSentAt(app.status, app) ? "Sent" : "Not sent"}
-            </span>
-          )}
-        </div>
+      {/* LEFT: initials avatar */}
+      <div
+        className="shrink-0 flex items-center justify-center rounded-full"
+        style={{ width: 32, height: 32, background: "#242040" }}
+      >
+        <span style={{ fontSize: 11, fontWeight: 500, color: "#8B7FEE" }}>
+          {getInitials(app.applicant.name)}
+        </span>
       </div>
+
+      {/* MIDDLE: name + role + optional team pref */}
+      <div className="min-w-0 flex-1">
+        <p className="truncate" style={{ fontSize: 12, fontWeight: 500, color: "#EAE8F2", lineHeight: "1.3" }}>
+          {app.applicant.name}
+        </p>
+        <p className="truncate" style={{ fontSize: 10, color: "#6A6580", lineHeight: "1.3" }}>
+          {app.role}
+        </p>
+        {app.track === "Ambassador" && app.rawData?._teamPreference1 && (
+          <p className="truncate" style={{ fontSize: 9, color: "#8B7FEE", opacity: 0.7, lineHeight: "1.3" }}>
+            Prefers: {app.rawData._teamPreference1}
+          </p>
+        )}
+      </div>
+
+      {/* RIGHT: email status badge */}
+      {showEmail && (
+        <span
+          className="shrink-0"
+          style={{
+            fontSize: 9,
+            padding: "2px 6px",
+            borderRadius: 4,
+            lineHeight: "1.4",
+            background: emailSent ? "rgba(74,222,128,0.12)" : "rgba(106,101,128,0.2)",
+            color: emailSent ? "#4ADE80" : "#6A6580",
+            whiteSpace: "nowrap",
+          }}
+        >
+          ✉ {emailSent ? "Sent" : "Not sent"}
+        </span>
+      )}
     </div>
   );
 }
@@ -723,22 +856,42 @@ function Column({
   apps: Application[];
   onOpen: (app: Application) => void;
 }) {
+  const barColor = columnBarColor(status);
   return (
-    <div className={`flex flex-col min-w-0 bg-[#131929] rounded-xl border-t-2 ${columnAccent(status)} p-4 overflow-hidden`}>
-      {/* Sticky column header */}
-      <div className="flex items-center justify-between mb-4 shrink-0">
-        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">{status}</h3>
-        <span className="text-xs bg-slate-700/60 text-slate-400 rounded-full px-2 py-0.5">
+    <div className="flex flex-col min-w-0 overflow-hidden">
+      {/* Column header */}
+      <div className="flex items-center gap-2 mb-3 shrink-0">
+        {/* Colored bar */}
+        <div style={{ width: 3, height: 14, borderRadius: 2, background: barColor, flexShrink: 0 }} />
+        <h3
+          className="flex-1 uppercase"
+          style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.6px", color: "#A09BB5" }}
+        >
+          {status}
+        </h3>
+        <span
+          style={{
+            fontSize: 10,
+            background: "#1C1930",
+            color: "#6A6580",
+            padding: "2px 8px",
+            borderRadius: 10,
+          }}
+        >
           {apps.length}
         </span>
       </div>
-      {/* Scrollable card list */}
-      <div className="flex-1 overflow-y-auto space-y-3 pr-0.5">
+
+      {/* Card list */}
+      <div className="flex-1 overflow-y-auto space-y-2">
         {apps.map((app) => (
           <ApplicantCard key={app.id} app={app} onOpen={onOpen} />
         ))}
         {apps.length === 0 && (
-          <p className="text-xs text-slate-600 text-center py-8 border border-dashed border-slate-700/50 rounded-lg">
+          <p
+            className="text-center py-8 rounded-lg"
+            style={{ fontSize: 11, color: "#6A6580", border: "0.5px dashed rgba(139,130,190,0.15)" }}
+          >
             No applicants
           </p>
         )}
@@ -746,6 +899,17 @@ function Column({
     </div>
   );
 }
+
+// ── Pill style for command strip controls ─────────────────────────────────────
+const stripPillStyle: React.CSSProperties = {
+  background: "#1C1930",
+  border: "0.5px solid rgba(139,130,190,0.12)",
+  color: "#A09BB5",
+  borderRadius: "6px",
+  fontSize: "12px",
+  padding: "6px 10px",
+  outline: "none",
+};
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
@@ -758,7 +922,9 @@ export default function AdminPage() {
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [selectedTeam, setSelectedTeam] = useState("All Teams");
 
-  // Fetch distinct opportunities and auto-select the first one on mount
+  // Import opportunity state (lifted from ImportButton)
+  const importOpportunity = useImportOpportunity();
+
   const fetchOpportunities = useCallback((autoSelect = false) => {
     fetch("/api/applications?opportunities=true")
       .then((r) => r.json())
@@ -773,7 +939,6 @@ export default function AdminPage() {
     fetchOpportunities(true);
   }, [fetchOpportunities]);
 
-  // Fetch applications for the selected opportunity
   const fetchApps = useCallback(() => {
     if (!selectedOpportunity) return;
     setLoadingApps(true);
@@ -790,22 +955,17 @@ export default function AdminPage() {
     fetchApps();
   }, [fetchApps]);
 
-  // True when the loaded applications contain at least one Ambassador track entry
   const isAmbassadorBoard = applications.some((a) => a.track === "Ambassador");
 
-  // Reset team filter when switching to a non-Ambassador opportunity
   useEffect(() => {
     if (!isAmbassadorBoard) setSelectedTeam("All Teams");
   }, [isAmbassadorBoard]);
 
-  // Re-fetches both the opportunity list and the board after a CSV import.
-  // Auto-selects the first opportunity when nothing is currently selected (first-ever import).
   const handleImportSuccess = useCallback(() => {
     fetchOpportunities(!selectedOpportunity);
     fetchApps();
   }, [fetchOpportunities, fetchApps, selectedOpportunity]);
 
-  // Optimistic status update — moves card to new column immediately
   const handleStatusChange = useCallback((id: string, newStatus: string) => {
     setApplications((prev) =>
       prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
@@ -824,63 +984,128 @@ export default function AdminPage() {
     return true;
   });
 
-  const byStatus = (status: Status) =>
-    filtered.filter((a) => a.status === status);
+  const byStatus = (status: Status) => filtered.filter((a) => a.status === status);
 
   return (
-    <main className="h-screen overflow-hidden flex flex-col p-8" style={{ backgroundColor: "#0f1117" }}>
-      <div className="max-w-7xl mx-auto w-full flex flex-col flex-1 overflow-hidden">
-
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8 shrink-0">
-          <div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">Applicant Tracking</h1>
-            <p className="text-slate-400 text-sm mt-1">Manage incoming applications by opportunity.</p>
+    <main
+      className="h-screen overflow-hidden flex flex-col"
+      style={{ background: "#0C0A14" }}
+    >
+      {/* ── ZONE 1: Header Bar (~48px) ─────────────────────────────────────── */}
+      <header
+        className="flex items-center justify-between px-5 shrink-0"
+        style={{
+          height: "48px",
+          background: "#141120",
+          borderBottom: "0.5px solid rgba(139,130,190,0.12)",
+        }}
+      >
+        {/* Left: logo + app name */}
+        <div className="flex items-center gap-2.5">
+          {/* Logo mark */}
+          <div
+            className="w-7 h-7 rounded-[6px] flex items-center justify-center shrink-0"
+            style={{ background: "linear-gradient(135deg, #6B5FCC, #D4537E)" }}
+          >
+            <span className="text-sm font-bold" style={{ color: "#EAE8F2" }}>R</span>
           </div>
-          <ImportButton onImportSuccess={handleImportSuccess} />
+          {/* App identity */}
+          <div className="leading-none">
+            <p className="text-[15px] font-semibold leading-tight" style={{ color: "#EAE8F2" }}>RCC ATS</p>
+            <p className="text-[11px] leading-tight" style={{ color: "#6A6580" }}>Applicant tracking system</p>
+          </div>
         </div>
 
-        {/* Opportunity selector + search */}
-        <div className="flex items-center gap-3 mb-6 shrink-0">
-          {opportunities.length === 0 ? (
-            <p className="text-sm text-slate-500">No opportunities found. Import a CSV to get started.</p>
-          ) : (
-            <select
-              value={selectedOpportunity}
-              onChange={(e) => setSelectedOpportunity(e.target.value)}
-              className="text-sm border border-slate-700 rounded-lg px-3 py-2 bg-[#1a2035] text-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-            >
-              {opportunities.map((o) => (
-                <option key={o} value={o}>{o}</option>
-              ))}
-            </select>
-          )}
-          {isAmbassadorBoard && (
-            <select
-              value={selectedTeam}
-              onChange={(e) => setSelectedTeam(e.target.value)}
-              className="text-sm border border-slate-700 rounded-lg px-3 py-2 bg-[#1a2035] text-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-            >
-              <option value="All Teams">All Teams</option>
-              {AMBASSADOR_TEAMS.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          )}
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or email..."
-            className="text-sm border border-slate-700 rounded-lg px-3 py-2 bg-[#1a2035] text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-teal-500 w-64"
-          />
+        {/* Right: user identity */}
+        <div className="flex items-center gap-2">
+          <span className="text-[12px]" style={{ color: "#6A6580" }}>Pouya Anvari</span>
+          <div
+            className="w-[30px] h-[30px] rounded-full flex items-center justify-center shrink-0"
+            style={{ background: "linear-gradient(135deg, #6B5FCC, #D4537E)" }}
+          >
+            <span className="text-[11px] font-semibold" style={{ color: "#EAE8F2" }}>PA</span>
+          </div>
         </div>
+      </header>
 
-        {/* Kanban board */}
+      {/* ── ZONE 2: Command Strip (~44px) — relative so banners can anchor to it */}
+      <div
+        className="flex items-center gap-2 px-5 shrink-0 relative"
+        style={{
+          height: "44px",
+          background: "#141120",
+          borderBottom: "0.5px solid rgba(139,130,190,0.12)",
+        }}
+      >
+        {/* 1. Board opportunity dropdown */}
+        {opportunities.length > 0 && (
+          <select
+            value={selectedOpportunity}
+            onChange={(e) => setSelectedOpportunity(e.target.value)}
+            className="appearance-none cursor-pointer transition-colors"
+            style={{ ...stripPillStyle, maxWidth: "160px" }}
+          >
+            {opportunities.map((o) => (
+              <option key={o} value={o}>{o}</option>
+            ))}
+          </select>
+        )}
+        {opportunities.length === 0 && (
+          <span style={{ ...stripPillStyle, color: "#6A6580", cursor: "default" }}>
+            No opportunities
+          </span>
+        )}
+
+        {/* 2. Ambassador team filter (only when ambassador board) */}
+        {isAmbassadorBoard && (
+          <select
+            value={selectedTeam}
+            onChange={(e) => setSelectedTeam(e.target.value)}
+            className="appearance-none cursor-pointer transition-colors"
+            style={stripPillStyle}
+          >
+            <option value="All Teams">All Teams</option>
+            {AMBASSADOR_TEAMS.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        )}
+
+        {/* 3. Divider */}
+        <div style={{ width: "1px", height: "20px", background: "rgba(139,130,190,0.12)", flexShrink: 0 }} />
+
+        {/* 4. Search box */}
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or email..."
+          className="transition-colors"
+          style={{
+            ...stripPillStyle,
+            flex: "1",
+            maxWidth: "280px",
+            color: search ? "#EAE8F2" : "#6A6580",
+          }}
+        />
+
+        {/* 5. Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Import — single button that opens the full import panel */}
+        <ImportButton
+          selectedOpportunity={importOpportunity.selectedOpportunity}
+          onImportSuccess={handleImportSuccess}
+          importOpportunity={importOpportunity}
+        />
+      </div>
+
+      {/* ── ZONE 3: Board Area ─────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-hidden px-6 py-4">
         {loadingApps ? (
-          <p className="text-sm text-slate-500">Loading...</p>
+          <p className="text-sm" style={{ color: "#6A6580" }}>Loading...</p>
         ) : (
-          <div className="grid grid-cols-4 gap-4 flex-1 overflow-hidden">
+          <div className="grid grid-cols-4 gap-4 h-full">
             {STATUSES.map((status) => (
               <Column
                 key={status}
@@ -893,7 +1118,7 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* Full-page modal */}
+      {/* Full-page applicant modal */}
       {selectedApp && (
         <ApplicantModal
           initialApp={selectedApp}
