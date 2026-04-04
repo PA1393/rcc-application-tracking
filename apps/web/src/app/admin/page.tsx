@@ -6,6 +6,7 @@ import ImportButton, {
   useImportOpportunity,
 } from "@/components/importButton";
 import { getEmailTemplate } from "@/lib/emailTemplates";
+import ManageAccessModal from "@/components/ManageAccessModal";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -930,6 +931,7 @@ export default function AdminPage() {
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const [renameLoading, setRenameLoading] = useState(false);
+  const [showAccessModal, setShowAccessModal] = useState(false);
 
   const { data: session } = useSession();
   const sessionName = session?.user?.name ?? "User";
@@ -1210,6 +1212,21 @@ export default function AdminPage() {
         {/* 5. Spacer */}
         <div style={{ flex: 1 }} />
 
+        {/* Manage Access */}
+        <button
+          onClick={() => setShowAccessModal(true)}
+          className="transition-colors"
+          style={{
+            ...stripPillStyle,
+            cursor: "pointer",
+            border: "0.5px solid rgba(139,130,190,0.12)",
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
+        >
+          Manage Access
+        </button>
+
         {/* Import — single button that opens the full import panel */}
         <ImportButton
           selectedOpportunity={importOpportunity.selectedOpportunity}
@@ -1245,6 +1262,11 @@ export default function AdminPage() {
           onRefreshBoard={fetchApps}
           boardOpportunity={selectedOpportunity}
         />
+      )}
+
+      {/* Manage Access modal */}
+      {showAccessModal && (
+        <ManageAccessModal onClose={() => setShowAccessModal(false)} />
       )}
     </main>
   );
