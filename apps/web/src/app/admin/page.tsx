@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSession, signOut } from "next-auth/react";
 import ImportButton, {
   useImportOpportunity,
 } from "@/components/importButton";
@@ -373,6 +374,7 @@ function ApplicantModal({
     decision_notes:    initialApp.decision_notes    ?? "",
   });
   const [savingNotes, setSavingNotes] = useState(false);
+  const { data: modalSession } = useSession();
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [changingStatus, setChangingStatus] = useState(false);
   const [emailDraftStatus, setEmailDraftStatus] = useState<string | null>(null);
@@ -695,6 +697,9 @@ function ApplicantModal({
               {savingNotes && (
                 <p className="mt-1" style={{ fontSize: 11, color: "#6A6580" }}>Saving...</p>
               )}
+              <p className="mt-1" style={{ fontSize: 10, color: "#6A6580", fontStyle: "italic" }}>
+                Last edited by {modalSession?.user?.name ?? "Unknown"}
+              </p>
             </div>
 
             {/* Change Status */}
@@ -926,6 +931,10 @@ export default function AdminPage() {
   const [renameError, setRenameError] = useState<string | null>(null);
   const [renameLoading, setRenameLoading] = useState(false);
 
+  const { data: session } = useSession();
+  const sessionName = session?.user?.name ?? "User";
+  const sessionInitials = getInitials(sessionName);
+
   // Import opportunity state (lifted from ImportButton)
   const importOpportunity = useImportOpportunity();
 
@@ -1056,15 +1065,33 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Right: user identity */}
+        {/* Right: user identity + sign out */}
         <div className="flex items-center gap-2">
-          <span className="text-[12px]" style={{ color: "#6A6580" }}>Pouya Anvari</span>
-          <div
-            className="w-[30px] h-[30px] rounded-full flex items-center justify-center shrink-0"
-            style={{ background: "linear-gradient(135deg, #6B5FCC, #D4537E)" }}
+          <span className="text-[12px]" style={{ color: "#6A6580" }}>{sessionName}</span>
+          {session?.user?.image ? (
+            <img
+              src={session.user.image}
+              alt={sessionName}
+              referrerPolicy="no-referrer"
+              className="w-[30px] h-[30px] rounded-full shrink-0 object-cover"
+            />
+          ) : (
+            <div
+              className="w-[30px] h-[30px] rounded-full flex items-center justify-center shrink-0"
+              style={{ background: "linear-gradient(135deg, #6B5FCC, #D4537E)" }}
+            >
+              <span className="text-[11px] font-semibold" style={{ color: "#EAE8F2" }}>{sessionInitials}</span>
+            </div>
+          )}
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="text-[11px] transition-colors"
+            style={{ color: "#6A6580", background: "transparent", border: "none", cursor: "pointer", padding: "2px 0" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#6A6580"; }}
           >
-            <span className="text-[11px] font-semibold" style={{ color: "#EAE8F2" }}>PA</span>
-          </div>
+            Sign out
+          </button>
         </div>
       </header>
 

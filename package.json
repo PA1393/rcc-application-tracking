@@ -27,15 +27,19 @@
   },
   "dependencies": {
     "@application-tracking-system/env": "workspace:*",
+    "@auth/prisma-adapter": "^2.11.1",
     "@prisma/client-runtime-utils": "^7.4.2",
     "@types/papaparse": "^5.5.2",
+    "bcryptjs": "^3.0.3",
     "dotenv": "catalog:",
+    "next-auth": "^5.0.0-beta.30",
     "nodemailer": "^8.0.3",
     "papaparse": "^5.5.3",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@application-tracking-system/config": "workspace:*",
+    "@types/bcryptjs": "^3.0.0",
     "@types/node": "^22.13.14",
     "@types/nodemailer": "^7.0.11",
     "typescript": "catalog:"

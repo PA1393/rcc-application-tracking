@@ -61,7 +61,7 @@ model Placement{
   applicant_id            String  //(This links back to Table 1)
   applicant               Applicant  @relation(fields: [applicant_id], references: [id], onDelete: Cascade)
 
-  track                   String 
+  track                   String
   role                    String //the role they won
   placed_at DateTime @default(now())
 
@@ -71,5 +71,53 @@ model Placement{
   @@unique([applicant_id, track, season])
 
 
+}
+
+// ── Auth models (NextAuth / Auth.js v5) ──────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  role          String    @default("reviewer")
+  accounts      Account[]
+  sessions      Session[]
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
 }
 
