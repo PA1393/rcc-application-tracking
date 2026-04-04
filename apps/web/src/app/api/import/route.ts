@@ -1,10 +1,15 @@
 import { normalizeData, normalizeAmbassadorData, parseRawCsv, detectCsvFormType } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
+import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
- //because applicant responses can be very long, Papaparse can handle long paragraph responses without columns breaking 
+ //because applicant responses can be very long, Papaparse can handle long paragraph responses without columns breaking
 
 
-export async function POST(request: Request) {  
+export async function POST(request: Request) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
+  if (session.user?.role !== "admin") return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+
 
     const formData = await request.formData();
 

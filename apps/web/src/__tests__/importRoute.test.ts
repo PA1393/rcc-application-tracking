@@ -3,6 +3,15 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // vi.mock() is hoisted to the top of the file at compile time — these intercept
 // the modules before the route handler imports them, so the route sees the mocks.
 
+// Mock auth so the route doesn't try to resolve next-auth internals in Vitest.
+// All existing import tests assume an admin caller; auth-guards.test.ts covers denial paths.
+vi.mock("@/lib/auth", () => ({
+  auth: vi.fn().mockResolvedValue({
+    user: { id: "u-admin", email: "admin@sjsu.edu", role: "admin" },
+    expires: "2099-01-01",
+  }),
+}));
+
 // Mock parseCsv so we control what the route "reads" from the CSV without touching
 // the filesystem or real PapaParse logic.
 vi.mock("@/lib/parseCsv", () => ({

@@ -1,5 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
+// Mock auth so the route doesn't try to resolve next-auth internals in Vitest.
+// Existing tests assume admin access; auth-guards.test.ts covers the denial paths.
+vi.mock("@/lib/auth", () => ({
+  auth: vi.fn().mockResolvedValue({
+    user: { id: "u-admin", email: "admin@sjsu.edu", role: "admin" },
+    expires: "2099-01-01",
+  }),
+}));
+
 // Mock prisma before importing the route so the route sees our mock.
 vi.mock("@/lib/prisma", () => ({
   default: {

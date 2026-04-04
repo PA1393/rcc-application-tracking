@@ -936,6 +936,7 @@ export default function AdminPage() {
   const { data: session } = useSession();
   const sessionName = session?.user?.name ?? "User";
   const sessionInitials = getInitials(sessionName);
+  const isAdmin = session?.user?.role === "admin";
 
   // Import opportunity state (lifted from ImportButton)
   const importOpportunity = useImportOpportunity();
@@ -1212,27 +1213,31 @@ export default function AdminPage() {
         {/* 5. Spacer */}
         <div style={{ flex: 1 }} />
 
-        {/* Manage Access */}
-        <button
-          onClick={() => setShowAccessModal(true)}
-          className="transition-colors"
-          style={{
-            ...stripPillStyle,
-            cursor: "pointer",
-            border: "0.5px solid rgba(139,130,190,0.12)",
-          }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
-        >
-          Manage Access
-        </button>
+        {/* Manage Access — admin only */}
+        {isAdmin && (
+          <button
+            onClick={() => setShowAccessModal(true)}
+            className="transition-colors"
+            style={{
+              ...stripPillStyle,
+              cursor: "pointer",
+              border: "0.5px solid rgba(139,130,190,0.12)",
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
+          >
+            Manage Access
+          </button>
+        )}
 
-        {/* Import — single button that opens the full import panel */}
-        <ImportButton
-          selectedOpportunity={importOpportunity.selectedOpportunity}
-          onImportSuccess={handleImportSuccess}
-          importOpportunity={importOpportunity}
-        />
+        {/* Import — admin only */}
+        {isAdmin && (
+          <ImportButton
+            selectedOpportunity={importOpportunity.selectedOpportunity}
+            onImportSuccess={handleImportSuccess}
+            importOpportunity={importOpportunity}
+          />
+        )}
       </div>
 
       {/* ── ZONE 3: Board Area ─────────────────────────────────────────────── */}
@@ -1264,8 +1269,8 @@ export default function AdminPage() {
         />
       )}
 
-      {/* Manage Access modal */}
-      {showAccessModal && (
+      {/* Manage Access modal — admin only */}
+      {isAdmin && showAccessModal && (
         <ManageAccessModal onClose={() => setShowAccessModal(false)} />
       )}
     </main>

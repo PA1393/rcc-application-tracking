@@ -14,6 +14,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // next-auth imports next/server internally which doesn't resolve in the
+      // Vitest Node environment. Redirect to a minimal stub for all tests.
+      "next-auth": path.resolve(__dirname, "./src/__tests__/__mocks__/next-auth.ts"),
     },
   },
 });
