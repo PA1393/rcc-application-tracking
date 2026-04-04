@@ -113,14 +113,20 @@ function LoginFormInner() {
           0%   { background-position: -200% center; }
           100% { background-position: 200% center; }
         }
-        @keyframes accentShift {
-          0%   { background-position: 0% center; }
-          50%  { background-position: 100% center; }
-          100% { background-position: 0% center; }
+        @keyframes rotateBorder {
+          0%   { --angle: 0deg; }
+          100% { --angle: 360deg; }
         }
-        .card-accent {
-          animation: accentShift 6s ease-in-out infinite;
-          background-size: 300% 100%;
+        @property --angle {
+          syntax: '<angle>';
+          initial-value: 0deg;
+          inherits: false;
+        }
+        .card-border-ring {
+          animation: rotateBorder 8s linear infinite;
+          background: conic-gradient(from var(--angle), transparent 20%, #6B5FCC 40%, #8B7FEE 50%, #D4537E 60%, transparent 80%);
+          border-radius: 15.5px;
+          padding: 1.5px;
         }
         .login-fade-1 { animation: fadeUp 0.45s ease both 0.05s; }
         .login-fade-2 { animation: fadeUp 0.45s ease both 0.15s; }
@@ -233,31 +239,18 @@ function LoginFormInner() {
               <span style={{ fontSize: 18, fontWeight: 700, color: "#EAE8F2", letterSpacing: "-0.3px" }}>RCC ATS</span>
             </div>
 
-            {/* Card */}
+            {/* Card — animated gradient border ring */}
+            <div className="card-border-ring" style={{ boxShadow: "0 0 24px rgba(107,95,204,0.12), 0 24px 48px rgba(0,0,0,0.4)" }}>
             <div
               style={{
                 background: "#141120",
-                border: "0.5px solid rgba(139,130,190,0.14)",
                 borderRadius: 14,
                 padding: "32px 28px 28px",
-                boxShadow: "0 1px 0 0 rgba(139,130,190,0.08) inset, 0 24px 48px rgba(0,0,0,0.4)",
+                boxShadow: "0 1px 0 0 rgba(139,130,190,0.08) inset",
                 position: "relative",
                 overflow: "hidden",
               }}
             >
-              {/* Top accent line — animated gradient */}
-              <div
-                className="card-accent"
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 2,
-                  background: "linear-gradient(90deg, transparent 0%, #6B5FCC 20%, #8B7FEE 40%, #D4537E 60%, #8B7FEE 80%, transparent 100%)",
-                  borderRadius: "14px 14px 0 0",
-                }}
-              />
 
               {/* Header */}
               <div className="login-fade-1" style={{ marginBottom: 28 }}>
@@ -330,6 +323,7 @@ function LoginFormInner() {
                 </p>
               </div>
             </div>
+            </div>{/* end card-border-ring */}
 
             {/* Footer */}
             <p className="login-fade-5" style={{ textAlign: "center", marginTop: 20, fontSize: 11, color: "#3D3A52" }}>
