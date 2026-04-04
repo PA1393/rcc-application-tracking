@@ -936,8 +936,6 @@ export default function AdminPage() {
   const { data: session } = useSession();
   const sessionName = session?.user?.name ?? "User";
   const sessionInitials = getInitials(sessionName);
-  const isAdmin = session?.user?.role === "admin";
-
   // Import opportunity state (lifted from ImportButton)
   const importOpportunity = useImportOpportunity();
 
@@ -1070,11 +1068,6 @@ export default function AdminPage() {
 
         {/* Right: user identity + sign out */}
         <div className="flex items-center gap-2">
-          {/* DEBUG: session info — remove before production */}
-          <div className="hidden sm:flex flex-col items-end leading-none mr-1">
-            <span className="text-[10px]" style={{ color: "#4A4560" }}>{session?.user?.email}</span>
-            <span className="text-[10px]" style={{ color: "#4A4560" }}>role: {session?.user?.role ?? "—"}</span>
-          </div>
           <span className="text-[12px]" style={{ color: "#6A6580" }}>{sessionName}</span>
           {session?.user?.image ? (
             <img
@@ -1218,31 +1211,27 @@ export default function AdminPage() {
         {/* 5. Spacer */}
         <div style={{ flex: 1 }} />
 
-        {/* Manage Access — admin only */}
-        {isAdmin && (
-          <button
-            onClick={() => setShowAccessModal(true)}
-            className="transition-colors"
-            style={{
-              ...stripPillStyle,
-              cursor: "pointer",
-              border: "0.5px solid rgba(139,130,190,0.12)",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
-          >
-            Manage Access
-          </button>
-        )}
+        {/* Manage Access */}
+        <button
+          onClick={() => setShowAccessModal(true)}
+          className="transition-colors"
+          style={{
+            ...stripPillStyle,
+            cursor: "pointer",
+            border: "0.5px solid rgba(139,130,190,0.12)",
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
+        >
+          Manage Access
+        </button>
 
-        {/* Import — admin only */}
-        {isAdmin && (
-          <ImportButton
-            selectedOpportunity={importOpportunity.selectedOpportunity}
-            onImportSuccess={handleImportSuccess}
-            importOpportunity={importOpportunity}
-          />
-        )}
+        {/* Import */}
+        <ImportButton
+          selectedOpportunity={importOpportunity.selectedOpportunity}
+          onImportSuccess={handleImportSuccess}
+          importOpportunity={importOpportunity}
+        />
       </div>
 
       {/* ── ZONE 3: Board Area ─────────────────────────────────────────────── */}
@@ -1274,8 +1263,8 @@ export default function AdminPage() {
         />
       )}
 
-      {/* Manage Access modal — admin only */}
-      {isAdmin && showAccessModal && (
+      {/* Manage Access modal */}
+      {showAccessModal && (
         <ManageAccessModal onClose={() => setShowAccessModal(false)} />
       )}
     </main>

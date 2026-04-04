@@ -8,7 +8,6 @@ type AtsUser = {
   id: string;
   name: string | null;
   email: string;
-  role: string;
   image: string | null;
 };
 
@@ -25,11 +24,11 @@ const inputStyle: React.CSSProperties = {
   transition: "border-color 0.15s, box-shadow 0.15s",
 };
 
-function focusBorder(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
+function focusBorder(e: React.FocusEvent<HTMLInputElement>) {
   e.currentTarget.style.borderColor = "#6B5FCC";
   e.currentTarget.style.boxShadow = "0 0 0 3px rgba(107,95,204,0.1)";
 }
-function blurBorder(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
+function blurBorder(e: React.FocusEvent<HTMLInputElement>) {
   e.currentTarget.style.borderColor = "rgba(139,130,190,0.14)";
   e.currentTarget.style.boxShadow = "none";
 }
@@ -70,30 +69,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function RoleBadge({ role }: { role: string }) {
-  const isAdmin = role === "admin";
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        borderRadius: 4,
-        padding: "2px 7px",
-        fontSize: 10,
-        fontWeight: 600,
-        letterSpacing: "0.3px",
-        textTransform: "uppercase",
-        background: isAdmin ? "rgba(139,127,238,0.12)" : "rgba(160,155,181,0.08)",
-        color: isAdmin ? "#8B7FEE" : "#6A6580",
-        border: `0.5px solid ${isAdmin ? "rgba(139,127,238,0.2)" : "rgba(139,130,190,0.1)"}`,
-        flexShrink: 0,
-      }}
-    >
-      {role}
-    </span>
-  );
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ManageAccessModal({ onClose }: { onClose: () => void }) {
@@ -104,12 +79,10 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
   // Add-user form state
   const [addEmail, setAddEmail] = useState("");
   const [addName, setAddName] = useState("");
-  const [addRole, setAddRole] = useState<"reviewer" | "admin">("reviewer");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
-  // Per-row updating/removing state
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  // Per-row removing state
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -132,7 +105,7 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
       const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: addEmail, name: addName || undefined, role: addRole }),
+        body: JSON.stringify({ email: addEmail, name: addName || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -142,34 +115,10 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
       setUsers((prev) => [...prev, data].sort((a, b) => a.email.localeCompare(b.email)));
       setAddEmail("");
       setAddName("");
-      setAddRole("reviewer");
     } catch {
       setAddError("Network error. Please try again.");
     } finally {
       setAdding(false);
-    }
-  }
-
-  async function handleRoleChange(user: AtsUser, newRole: string) {
-    if (newRole === user.role) return;
-    setUpdatingId(user.id);
-    setRowError(null);
-    try {
-      const res = await fetch("/api/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: user.id, role: newRole }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setRowError(data.error ?? "Failed to update role.");
-        return;
-      }
-      setUsers((prev) => prev.map((u) => (u.id === user.id ? data : u)));
-    } catch {
-      setRowError("Network error. Please try again.");
-    } finally {
-      setUpdatingId(null);
     }
   }
 
@@ -331,17 +280,7 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
                       onBlur={blurBorder}
                     />
                   </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <select
-                      value={addRole}
-                      onChange={(e) => setAddRole(e.target.value as "reviewer" | "admin")}
-                      style={{ ...inputStyle, cursor: "pointer", flex: 1 }}
-                      onFocus={focusBorder}
-                      onBlur={blurBorder}
-                    >
-                      <option value="reviewer">Reviewer</option>
-                      <option value="admin">Admin</option>
-                    </select>
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
                     <button
                       type="submit"
                       disabled={adding}
@@ -399,9 +338,7 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
 
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {users.map((user) => {
-                  const isUpdating = updatingId === user.id;
                   const isRemoving = removingId === user.id;
-                  const busy = isUpdating || isRemoving;
                   return (
                     <div
                       key={user.id}
@@ -411,7 +348,7 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
                         border: "0.5px solid rgba(139,130,190,0.08)",
                         borderRadius: 10,
                         padding: "11px 14px",
-                        opacity: busy ? 0.55 : 1,
+                        opacity: isRemoving ? 0.55 : 1,
                       }}
                     >
                       {/* Avatar */}
@@ -452,31 +389,10 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
                         </p>
                       </div>
 
-                      {/* Role badge + selector */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                        <RoleBadge role={user.role} />
-                        <select
-                          value={user.role}
-                          disabled={busy}
-                          onChange={(e) => handleRoleChange(user, e.target.value)}
-                          style={{
-                            ...inputStyle,
-                            padding: "4px 6px",
-                            fontSize: 11,
-                            cursor: busy ? "not-allowed" : "pointer",
-                          }}
-                          onFocus={focusBorder}
-                          onBlur={blurBorder}
-                        >
-                          <option value="reviewer">Reviewer</option>
-                          <option value="admin">Admin</option>
-                        </select>
-                      </div>
-
                       {/* Remove button */}
                       <button
                         onClick={() => handleRemove(user.id)}
-                        disabled={busy}
+                        disabled={isRemoving}
                         title="Remove access"
                         className="trash-btn"
                         style={{
@@ -485,7 +401,7 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
                           borderRadius: 7,
                           color: "#6A6580",
                           padding: "6px 7px",
-                          cursor: busy ? "not-allowed" : "pointer",
+                          cursor: isRemoving ? "not-allowed" : "pointer",
                           flexShrink: 0,
                           display: "flex",
                           alignItems: "center",

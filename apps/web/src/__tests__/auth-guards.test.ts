@@ -30,20 +30,15 @@ vi.mock("@/lib/upsert", () => ({
 }));
 
 import { auth } from "@/lib/auth";
-import { GET, POST, PATCH, DELETE } from "@/app/api/users/route";
+import { GET, POST, DELETE } from "@/app/api/users/route";
 import { POST as importPOST } from "@/app/api/import/route";
 
 // ── Session fixtures ──────────────────────────────────────────────────────────
 
 const NO_SESSION = null;
 
-const REVIEWER_SESSION = {
-  user: { id: "u-reviewer", email: "rev@sjsu.edu", role: "reviewer", name: "Reviewer" },
-  expires: "2099-01-01",
-};
-
-const ADMIN_SESSION = {
-  user: { id: "u-admin", email: "admin@sjsu.edu", role: "admin", name: "Admin" },
+const AUTHED_SESSION = {
+  user: { id: "u-user", email: "user@sjsu.edu", name: "User" },
   expires: "2099-01-01",
 };
 
@@ -79,43 +74,19 @@ describe("/api/users — unauthenticated (no session)", () => {
   it("POST returns 401", async () => {
     expect((await POST(makeRequest("POST", { email: "x@x.com" }))).status).toBe(401);
   });
-  it("PATCH returns 401", async () => {
-    expect((await PATCH(makeRequest("PATCH", { id: "1", role: "admin" }))).status).toBe(401);
-  });
   it("DELETE returns 401", async () => {
     expect((await DELETE(makeRequest("DELETE", { id: "1" }))).status).toBe(401);
   });
 });
 
-// ── /api/users — reviewer ─────────────────────────────────────────────────────
+// ── /api/users — authenticated user ──────────────────────────────────────────
 
-describe("/api/users — reviewer (authenticated, non-admin)", () => {
-  beforeEach(() => { vi.mocked(auth).mockResolvedValue(REVIEWER_SESSION as any); });
-
-  it("GET returns 403", async () => {
-    expect((await GET()).status).toBe(403);
-  });
-  it("POST returns 403", async () => {
-    expect((await POST(makeRequest("POST", { email: "x@x.com" }))).status).toBe(403);
-  });
-  it("PATCH returns 403", async () => {
-    expect((await PATCH(makeRequest("PATCH", { id: "1", role: "admin" }))).status).toBe(403);
-  });
-  it("DELETE returns 403", async () => {
-    expect((await DELETE(makeRequest("DELETE", { id: "1" }))).status).toBe(403);
-  });
-});
-
-// ── /api/users — admin ────────────────────────────────────────────────────────
-
-describe("/api/users — admin (authenticated, role=admin)", () => {
+describe("/api/users — authenticated user", () => {
   beforeEach(async () => {
-    vi.mocked(auth).mockResolvedValue(ADMIN_SESSION as any);
-    // Ensure prisma.user.create returns something serializable so the POST
-    // test doesn't fail on JSON serialization before we can check the status.
+    vi.mocked(auth).mockResolvedValue(AUTHED_SESSION as any);
     const { default: prisma } = await import("@/lib/prisma");
     vi.mocked(prisma.user.create).mockResolvedValue({
-      id: "u-new", name: null, email: "new@sjsu.edu", role: "reviewer", image: null,
+      id: "u-new", name: null, email: "new@sjsu.edu", image: null,
     } as any);
   });
 
@@ -125,15 +96,6 @@ describe("/api/users — admin (authenticated, role=admin)", () => {
   it("POST proceeds past auth guard (returns 201 or 409, not 401/403)", async () => {
     const status = (await POST(makeRequest("POST", { email: "new@sjsu.edu" }))).status;
     expect([201, 409]).toContain(status);
-  });
-  it("PATCH proceeds past auth guard (returns 2xx or 4xx from business logic, not 401/403)", async () => {
-    const { default: prisma } = await import("@/lib/prisma");
-    vi.mocked(prisma.user.update).mockResolvedValue({
-      id: "1", name: "A", email: "a@a.com", role: "admin", image: null,
-    } as any);
-    const status = (await PATCH(makeRequest("PATCH", { id: "1", role: "admin" }))).status;
-    expect(status).not.toBe(401);
-    expect(status).not.toBe(403);
   });
   it("DELETE proceeds past auth guard (returns 200, not 401/403)", async () => {
     const { default: prisma } = await import("@/lib/prisma");
@@ -154,20 +116,10 @@ describe("/api/import — unauthenticated (no session)", () => {
   });
 });
 
-// ── /api/import — reviewer ────────────────────────────────────────────────────
+// ── /api/import — authenticated user ─────────────────────────────────────────
 
-describe("/api/import — reviewer (authenticated, non-admin)", () => {
-  beforeEach(() => { vi.mocked(auth).mockResolvedValue(REVIEWER_SESSION as any); });
-
-  it("POST returns 403", async () => {
-    expect((await importPOST(makeImportRequest())).status).toBe(403);
-  });
-});
-
-// ── /api/import — admin (does not break existing import logic) ────────────────
-
-describe("/api/import — admin (authenticated, role=admin)", () => {
-  beforeEach(() => { vi.mocked(auth).mockResolvedValue(ADMIN_SESSION as any); });
+describe("/api/import — authenticated user", () => {
+  beforeEach(() => { vi.mocked(auth).mockResolvedValue(AUTHED_SESSION as any); });
 
   it("POST proceeds past auth guard and reaches import logic (returns 200 or 400, not 401/403)", async () => {
     const { parseRawCsv, detectCsvFormType, normalizeData } = await import("@/lib/parseCsv");

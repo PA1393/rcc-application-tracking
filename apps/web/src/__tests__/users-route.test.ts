@@ -1,10 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Mock auth so the route doesn't try to resolve next-auth internals in Vitest.
-// Existing tests assume admin access; auth-guards.test.ts covers the denial paths.
 vi.mock("@/lib/auth", () => ({
   auth: vi.fn().mockResolvedValue({
-    user: { id: "u-admin", email: "admin@sjsu.edu", role: "admin" },
+    user: { id: "u-user", email: "user@sjsu.edu" },
     expires: "2099-01-01",
   }),
 }));
@@ -16,20 +15,18 @@ vi.mock("@/lib/prisma", () => ({
       findMany: vi.fn(),
       findUnique: vi.fn(),
       create: vi.fn(),
-      update: vi.fn(),
       delete: vi.fn(),
     },
   },
 }));
 
 import prisma from "@/lib/prisma";
-import { GET, POST, PATCH, DELETE } from "@/app/api/users/route";
+import { GET, POST, DELETE } from "@/app/api/users/route";
 
 const MOCK_USER = {
   id: "user-1",
-  name: "Alice Admin",
+  name: "Alice",
   email: "alice@sjsu.edu",
-  role: "reviewer",
   image: null,
 };
 
@@ -61,17 +58,17 @@ describe("GET /api/users", () => {
 // ── POST ──────────────────────────────────────────────────────────────────────
 
 describe("POST /api/users", () => {
-  it("creates a new user with default reviewer role", async () => {
+  it("creates a new user", async () => {
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
     vi.mocked(prisma.user.create).mockResolvedValue(MOCK_USER as any);
 
-    const res = await POST(makeRequest("POST", { email: "alice@sjsu.edu", name: "Alice Admin" }));
+    const res = await POST(makeRequest("POST", { email: "alice@sjsu.edu", name: "Alice" }));
     expect(res.status).toBe(201);
     const data = await res.json();
     expect(data.email).toBe("alice@sjsu.edu");
     expect(prisma.user.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ email: "alice@sjsu.edu", role: "reviewer", password: null }),
+        data: expect.objectContaining({ email: "alice@sjsu.edu", password: null }),
       })
     );
   });
@@ -99,47 +96,6 @@ describe("POST /api/users", () => {
     const res = await POST(makeRequest("POST", { email: "not-an-email" }));
     expect(res.status).toBe(400);
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
-  });
-
-  it("accepts admin role", async () => {
-    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
-    vi.mocked(prisma.user.create).mockResolvedValue({ ...MOCK_USER, role: "admin" } as any);
-
-    const res = await POST(makeRequest("POST", { email: "alice@sjsu.edu", role: "admin" }));
-    expect(res.status).toBe(201);
-    expect(prisma.user.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ role: "admin" }),
-      })
-    );
-  });
-});
-
-// ── PATCH ─────────────────────────────────────────────────────────────────────
-
-describe("PATCH /api/users", () => {
-  it("updates a user's role", async () => {
-    const updated = { ...MOCK_USER, role: "admin" };
-    vi.mocked(prisma.user.update).mockResolvedValue(updated as any);
-
-    const res = await PATCH(makeRequest("PATCH", { id: "user-1", role: "admin" }));
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.role).toBe("admin");
-    expect(prisma.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "user-1" }, data: { role: "admin" } })
-    );
-  });
-
-  it("returns 400 for invalid role", async () => {
-    const res = await PATCH(makeRequest("PATCH", { id: "user-1", role: "superuser" }));
-    expect(res.status).toBe(400);
-    expect(prisma.user.update).not.toHaveBeenCalled();
-  });
-
-  it("returns 400 when id is missing", async () => {
-    const res = await PATCH(makeRequest("PATCH", { role: "admin" }));
-    expect(res.status).toBe(400);
   });
 });
 

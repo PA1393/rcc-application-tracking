@@ -8,7 +8,6 @@ import { NextResponse } from "next/server";
 export async function POST(request: Request) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
-  if (session.user?.role !== "admin") return NextResponse.json({ error: "Forbidden." }, { status: 403 });
 
 
     const formData = await request.formData();
