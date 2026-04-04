@@ -101,7 +101,9 @@ function LoginFormInner() {
         );
         break;
       case "AccessDenied":
-        setError("Access denied.");
+        setError(
+          "This Google account does not have access to RCC ATS. Contact an administrator."
+        );
         break;
       default:
         setError("Unable to sign in. Please try again.");
@@ -437,7 +439,7 @@ function LoginFormInner() {
             )}
           </form>
 
-          {/* Sign-up link */}
+          {/* Access notice */}
           <p
             style={{
               textAlign: "center",
@@ -446,25 +448,7 @@ function LoginFormInner() {
               color: "#6A6580",
             }}
           >
-            Don&apos;t have an account?{" "}
-            <a
-              href="/register"
-              style={{
-                color: "#8B7FEE",
-                fontWeight: 500,
-                textDecoration: "none",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.textDecoration =
-                  "underline";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.textDecoration =
-                  "none";
-              }}
-            >
-              Sign up
-            </a>
+            Need access? Contact an RCC administrator.
           </p>
 
           {/* Footer */}

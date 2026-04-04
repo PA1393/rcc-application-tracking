@@ -70,6 +70,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
+    async signIn({ account, profile }) {
+      // Only restrict Google sign-ins. Credentials are handled by `authorize`.
+      if (account?.provider === "google") {
+        const email = profile?.email;
+        if (!email) return false;
+        const existing = await prisma.user.findUnique({ where: { email } });
+        // Deny sign-in if the email is not already in the User table.
+        // Redirect to /login with a clear error code instead of the generic error page.
+        if (!existing) return "/login?error=AccessDenied";
+      }
+      return true;
+    },
     jwt({ token, user }) {
       if (user) {
         token.id = user.id;
