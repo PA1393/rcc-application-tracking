@@ -1070,6 +1070,11 @@ export default function AdminPage() {
 
         {/* Right: user identity + sign out */}
         <div className="flex items-center gap-2">
+          {/* DEBUG: session info — remove before production */}
+          <div className="hidden sm:flex flex-col items-end leading-none mr-1">
+            <span className="text-[10px]" style={{ color: "#4A4560" }}>{session?.user?.email}</span>
+            <span className="text-[10px]" style={{ color: "#4A4560" }}>role: {session?.user?.role ?? "—"}</span>
+          </div>
           <span className="text-[12px]" style={{ color: "#6A6580" }}>{sessionName}</span>
           {session?.user?.image ? (
             <img

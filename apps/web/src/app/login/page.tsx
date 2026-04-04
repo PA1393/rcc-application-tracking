@@ -113,6 +113,15 @@ function LoginFormInner() {
           0%   { background-position: -200% center; }
           100% { background-position: 200% center; }
         }
+        @keyframes accentShift {
+          0%   { background-position: 0% center; }
+          50%  { background-position: 100% center; }
+          100% { background-position: 0% center; }
+        }
+        .card-accent {
+          animation: accentShift 6s ease-in-out infinite;
+          background-size: 300% 100%;
+        }
         .login-fade-1 { animation: fadeUp 0.45s ease both 0.05s; }
         .login-fade-2 { animation: fadeUp 0.45s ease both 0.15s; }
         .login-fade-3 { animation: fadeUp 0.45s ease both 0.25s; }
@@ -236,15 +245,16 @@ function LoginFormInner() {
                 overflow: "hidden",
               }}
             >
-              {/* Top accent line */}
+              {/* Top accent line — animated gradient */}
               <div
+                className="card-accent"
                 style={{
                   position: "absolute",
                   top: 0,
                   left: 0,
                   right: 0,
                   height: 2,
-                  background: "linear-gradient(90deg, transparent 0%, #6B5FCC 30%, #8B7FEE 50%, #D4537E 70%, transparent 100%)",
+                  background: "linear-gradient(90deg, transparent 0%, #6B5FCC 20%, #8B7FEE 40%, #D4537E 60%, #8B7FEE 80%, transparent 100%)",
                   borderRadius: "14px 14px 0 0",
                 }}
               />
