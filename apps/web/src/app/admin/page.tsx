@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useSession, signOut } from "next-auth/react";
 import ImportButton, {
   useImportOpportunity,
@@ -381,6 +381,34 @@ function ApplicantModal({
   const [emailDraftStatus, setEmailDraftStatus] = useState<string | null>(null);
   const [previousEmailStatus, setPreviousEmailStatus] = useState<string | null>(null);
   const [toastVisible, setToastVisible] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesPanelWidth, setNotesPanelWidth] = useState(NOTES_DEFAULT_WIDTH);
+  const [isDragging, setIsDragging] = useState(false);
+  const [handleHover, setHandleHover] = useState(false);
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    if (!notesOpen) setNotesPanelWidth(NOTES_DEFAULT_WIDTH);
+  }, [notesOpen]);
+
+  // Drag listeners — registered only while dragging; effect cleanup handles unmount-mid-drag.
+  useEffect(() => {
+    if (!isDragging) return;
+    function onMove(e: MouseEvent) {
+      if (!dragRef.current) return;
+      const { startX, startWidth } = dragRef.current;
+      // Left-edge handle on a right-side panel: drag left → wider (startX - clientX > 0)
+      const next = Math.min(NOTES_MAX_WIDTH, Math.max(NOTES_MIN_WIDTH, startWidth + (startX - e.clientX)));
+      setNotesPanelWidth(next);
+    }
+    function onUp() { setIsDragging(false); }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [isDragging]);
 
   useEffect(() => {
     fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
@@ -515,10 +543,16 @@ function ApplicantModal({
         style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
         onClick={() => { if (!pendingStatus && !emailDraftStatus) onClose(); }}
       >
-        {/* Modal panel */}
+        {/* Modal panel — widens when notes drawer is open */}
         <div
-          className="rcc-modal-panel relative w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl"
-          style={{ background: "#141120", border: "0.5px solid rgba(139,130,190,0.12)", borderRadius: 12 }}
+          className="rcc-modal-panel relative w-full max-h-[90vh] flex flex-col shadow-2xl"
+          style={{
+            maxWidth: notesOpen ? "72rem" : "48rem",
+            transition: "max-width 0.26s cubic-bezier(0.16, 1, 0.3, 1)",
+            background: "#141120",
+            border: "0.5px solid rgba(139,130,190,0.12)",
+            borderRadius: 12,
+          }}
           onClick={(e) => e.stopPropagation()}
         >
 
@@ -586,15 +620,50 @@ function ApplicantModal({
                 {activeApp.status}
               </span>
             </div>
-            <button
-              onClick={onClose}
-              className="shrink-0 ml-4 leading-none transition-colors"
-              style={{ fontSize: 16, color: "#6A6580" }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#6A6580"; }}
-            >
-              ✕
-            </button>
+            <div className="flex items-center gap-2 shrink-0 ml-4">
+              {/* Notes toggle */}
+              <button
+                onClick={() => setNotesOpen((v) => !v)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-[7px] transition-all"
+                title={notesOpen ? "Close notes" : "Open notes"}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 500,
+                  letterSpacing: "0.3px",
+                  background: notesOpen ? "rgba(139,127,238,0.18)" : "transparent",
+                  border: `0.5px solid ${notesOpen ? "rgba(139,127,238,0.4)" : "rgba(139,130,190,0.18)"}`,
+                  color: notesOpen ? "#8B7FEE" : "#6A6580",
+                  cursor: "pointer",
+                }}
+                onMouseEnter={(e) => {
+                  if (!notesOpen) {
+                    (e.currentTarget as HTMLButtonElement).style.background = "#1C1930";
+                    (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!notesOpen) {
+                    (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                    (e.currentTarget as HTMLButtonElement).style.color = "#6A6580";
+                  }
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 9.5V11h1.5l5-5L6 4.5l-5 5ZM10.7 2.3a1 1 0 0 0 0-1.4L9.1.3a1 1 0 0 0-1.4 0L6.5 1.5 9 4l1.7-1.7Z" fill="currentColor"/>
+                </svg>
+                Notes
+              </button>
+              {/* Close */}
+              <button
+                onClick={onClose}
+                className="leading-none transition-colors"
+                style={{ fontSize: 16, color: "#6A6580" }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#6A6580"; }}
+              >
+                ✕
+              </button>
+            </div>
           </div>
 
           {/* Role / opportunity tabs */}
@@ -627,143 +696,297 @@ function ApplicantModal({
             ))}
           </div>
 
-          {/* Scrollable content */}
-          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {/* Body — two-column when notes are open */}
+          <div className="flex-1 overflow-hidden flex min-h-0">
 
-            {/* Q&A section — divider-separated, no card boxes */}
-            {activeApp.rawData && Object.keys(activeApp.rawData).length > 0 ? (
-              <div>
-                {Object.entries(activeApp.rawData)
-                  .filter(([key]) => !key.startsWith("_"))
-                  .map(([question, answer], i, arr) => (
-                    <div
-                      key={question}
-                      className="py-3"
-                      style={i < arr.length - 1 ? { borderBottom: "0.5px solid rgba(139,130,190,0.08)" } : {}}
-                    >
-                      <p className="mb-1 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
-                        {question}
-                      </p>
-                      <p className="whitespace-pre-wrap leading-relaxed" style={{ fontSize: 13, color: "#EAE8F2" }}>
-                        {String(answer) || "—"}
-                      </p>
-                    </div>
-                  ))}
-              </div>
-            ) : (
-              <p style={{ fontSize: 13, color: "#6A6580", fontStyle: "italic" }}>No form responses recorded.</p>
-            )}
+            {/* LEFT: Scrollable application content */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 min-w-0">
 
-            {/* Notes — tabbed */}
-            <div>
-              <div className="flex gap-1 mb-2.5">
-                {visibleFields.map((field) => {
-                  const tab = NOTE_TABS.find((t) => t.field === field)!;
-                  const isActive = activeField === field;
-                  return (
-                    <button
-                      key={field}
-                      onClick={() => setActiveNotesTab(field)}
-                      className="px-3 py-1 transition-colors"
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 500,
-                        borderRadius: 6,
-                        ...(isActive
-                          ? { background: "rgba(139,127,238,0.15)", color: "#8B7FEE" }
-                          : { background: "transparent", color: "#A09BB5" }),
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "#1C1930";
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <textarea
-                value={noteDrafts[activeField]}
-                onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [activeField]: e.target.value }))}
-                onBlur={saveNotes}
-                rows={4}
-                placeholder={NOTE_TABS.find((t) => t.field === activeField)!.placeholder}
-                className={`${modalInputCls} resize-none`}
-                style={{ ...modalInputStyle, fontSize: 13, lineHeight: "1.6" }}
-                onFocus={(e) => { e.currentTarget.style.borderColor = "#6B5FCC"; }}
-              />
-              {savingNotes && (
-                <p className="mt-1" style={{ fontSize: 11, color: "#6A6580" }}>Saving...</p>
-              )}
-              <p className="mt-1" style={{ fontSize: 10, color: "#6A6580", fontStyle: "italic" }}>
-                Last edited by {modalSession?.user?.name ?? "Unknown"}
-              </p>
-            </div>
-
-            {/* Change Status */}
-            <div>
-              <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
-                Change Status
-              </p>
-              <div className="flex gap-2 flex-wrap">
-                {ACTION_STATUSES.filter((s) => s !== activeApp.status).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setPendingStatus(s)}
-                    style={statusButtonBase}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.borderColor = "#6B5FCC";
-                      (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2";
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(139,130,190,0.12)";
-                      (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5";
-                    }}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Email History */}
-            {(() => {
-              const rows: { label: string; sentAt: string | null }[] = [];
-              const s = activeApp.status;
-              if (s === "Interviewing" || s === "Accepted" || s === "Rejected") {
-                rows.push({ label: "Interview invite", sentAt: activeApp.interview_invite_sent });
-              }
-              if (s === "Accepted") {
-                rows.push({ label: "Acceptance email", sentAt: activeApp.acceptance_sent_at });
-              }
-              if (s === "Rejected") {
-                rows.push({ label: "Rejection email", sentAt: activeApp.rejection_sent_at });
-              }
-              if (rows.length === 0) return null;
-              return (
+              {/* Q&A section — divider-separated, no card boxes */}
+              {activeApp.rawData && Object.keys(activeApp.rawData).length > 0 ? (
                 <div>
-                  <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
-                    Email History
-                  </p>
-                  <div className="space-y-2">
-                    {rows.map(({ label, sentAt }) => (
-                      <div key={label} className="flex items-center gap-2">
-                        <span style={{ fontSize: 12, color: sentAt ? "#4ADE80" : "#6A6580" }}>✉</span>
-                        <span style={{ fontSize: 12, color: "#A09BB5" }}>{label}</span>
-                        {sentAt ? (
-                          <span className="ml-auto" style={{ fontSize: 12, color: "#4ADE80" }}>{formatDateTime(sentAt)}</span>
-                        ) : (
-                          <span className="ml-auto" style={{ fontSize: 12, color: "#6A6580" }}>not sent</span>
-                        )}
+                  {Object.entries(activeApp.rawData)
+                    .filter(([key]) => !key.startsWith("_"))
+                    .map(([question, answer], i, arr) => (
+                      <div
+                        key={question}
+                        className="py-3"
+                        style={i < arr.length - 1 ? { borderBottom: "0.5px solid rgba(139,130,190,0.08)" } : {}}
+                      >
+                        <p className="mb-1 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
+                          {question}
+                        </p>
+                        <p className="whitespace-pre-wrap leading-relaxed" style={{ fontSize: 13, color: "#EAE8F2" }}>
+                          {String(answer) || "—"}
+                        </p>
                       </div>
                     ))}
+                </div>
+              ) : (
+                <p style={{ fontSize: 13, color: "#6A6580", fontStyle: "italic" }}>No form responses recorded.</p>
+              )}
+
+              {/* Notes — tabbed (shown at bottom only when side panel is closed) */}
+              {!notesOpen && (
+                <div>
+                  <div className="flex gap-1 mb-2.5">
+                    {visibleFields.map((field) => {
+                      const tab = NOTE_TABS.find((t) => t.field === field)!;
+                      const isActive = activeField === field;
+                      return (
+                        <button
+                          key={field}
+                          onClick={() => setActiveNotesTab(field)}
+                          className="px-3 py-1 transition-colors"
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 500,
+                            borderRadius: 6,
+                            ...(isActive
+                              ? { background: "rgba(139,127,238,0.15)", color: "#8B7FEE" }
+                              : { background: "transparent", color: "#A09BB5" }),
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "#1C1930";
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                          }}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <textarea
+                    value={noteDrafts[activeField]}
+                    onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [activeField]: e.target.value }))}
+                    onBlur={saveNotes}
+                    rows={4}
+                    placeholder={NOTE_TABS.find((t) => t.field === activeField)!.placeholder}
+                    className={`${modalInputCls} resize-none`}
+                    style={{ ...modalInputStyle, fontSize: 13, lineHeight: "1.6" }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = "#6B5FCC"; }}
+                  />
+                  {savingNotes && (
+                    <p className="mt-1" style={{ fontSize: 11, color: "#6A6580" }}>Saving...</p>
+                  )}
+                  <p className="mt-1" style={{ fontSize: 10, color: "#6A6580", fontStyle: "italic" }}>
+                    Last edited by {modalSession?.user?.name ?? "Unknown"}
+                  </p>
+                </div>
+              )}
+
+              {/* Change Status */}
+              <div>
+                <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
+                  Change Status
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  {ACTION_STATUSES.filter((s) => s !== activeApp.status).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setPendingStatus(s)}
+                      style={statusButtonBase}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.borderColor = "#6B5FCC";
+                        (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2";
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(139,130,190,0.12)";
+                        (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5";
+                      }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Email History */}
+              {(() => {
+                const rows: { label: string; sentAt: string | null }[] = [];
+                const s = activeApp.status;
+                if (s === "Interviewing" || s === "Accepted" || s === "Rejected") {
+                  rows.push({ label: "Interview invite", sentAt: activeApp.interview_invite_sent });
+                }
+                if (s === "Accepted") {
+                  rows.push({ label: "Acceptance email", sentAt: activeApp.acceptance_sent_at });
+                }
+                if (s === "Rejected") {
+                  rows.push({ label: "Rejection email", sentAt: activeApp.rejection_sent_at });
+                }
+                if (rows.length === 0) return null;
+                return (
+                  <div>
+                    <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
+                      Email History
+                    </p>
+                    <div className="space-y-2">
+                      {rows.map(({ label, sentAt }) => (
+                        <div key={label} className="flex items-center gap-2">
+                          <span style={{ fontSize: 12, color: sentAt ? "#4ADE80" : "#6A6580" }}>✉</span>
+                          <span style={{ fontSize: 12, color: "#A09BB5" }}>{label}</span>
+                          {sentAt ? (
+                            <span className="ml-auto" style={{ fontSize: 12, color: "#4ADE80" }}>{formatDateTime(sentAt)}</span>
+                          ) : (
+                            <span className="ml-auto" style={{ fontSize: 12, color: "#6A6580" }}>not sent</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* RIGHT: Side notes panel */}
+            {notesOpen && (
+              <div
+                key={activeApp.id}
+                className="rcc-notes-panel shrink-0 flex flex-col overflow-hidden relative"
+                style={{
+                  width: notesPanelWidth,
+                  borderLeft: "0.5px solid rgba(139,130,190,0.12)",
+                  background: "#0F0D1A",
+                }}
+              >
+                {/* Drag handle — left edge of the right-side panel */}
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize notes panel"
+                  tabIndex={0}
+                  title="Drag to resize · Double-click to reset"
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 6,
+                    cursor: "col-resize",
+                    zIndex: 10,
+                    background: handleHover || isDragging
+                      ? "rgba(139,127,238,0.18)"
+                      : "transparent",
+                    transition: "background 0.15s",
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    dragRef.current = { startX: e.clientX, startWidth: notesPanelWidth };
+                    setIsDragging(true);
+                  }}
+                  onDoubleClick={() => setNotesPanelWidth(NOTES_DEFAULT_WIDTH)}
+                  onMouseEnter={() => setHandleHover(true)}
+                  onMouseLeave={() => setHandleHover(false)}
+                  onKeyDown={(e) => {
+                    const STEP = 20;
+                    if (e.key === "ArrowLeft") {
+                      e.preventDefault();
+                      setNotesPanelWidth((w) => Math.min(NOTES_MAX_WIDTH, w + STEP));
+                    } else if (e.key === "ArrowRight") {
+                      e.preventDefault();
+                      setNotesPanelWidth((w) => Math.max(NOTES_MIN_WIDTH, w - STEP));
+                    } else if (e.key === "Enter" || e.key === "Home") {
+                      e.preventDefault();
+                      setNotesPanelWidth(NOTES_DEFAULT_WIDTH);
+                    }
+                  }}
+                />
+                {/* Panel header */}
+                <div
+                  className="flex items-center justify-between px-4 py-3 shrink-0"
+                  style={{ borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}
+                >
+                  <div className="flex items-center gap-2">
+                    {/* Subtle glow dot */}
+                    <div
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: "#8B7FEE",
+                        boxShadow: "0 0 6px 2px rgba(139,127,238,0.45)",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "#A09BB5", letterSpacing: "0.5px", textTransform: "uppercase" }}>
+                      Notes
+                    </span>
+                  </div>
+                  {/* Tab switcher */}
+                  <div className="flex gap-0.5">
+                    {visibleFields.map((field) => {
+                      const tab = NOTE_TABS.find((t) => t.field === field)!;
+                      const isActive = activeField === field;
+                      const shortLabel = tab.label.replace(" Notes", "");
+                      return (
+                        <button
+                          key={field}
+                          onClick={() => setActiveNotesTab(field)}
+                          className="px-2 py-0.5 transition-colors"
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 500,
+                            borderRadius: 5,
+                            ...(isActive
+                              ? { background: "rgba(139,127,238,0.18)", color: "#8B7FEE" }
+                              : { background: "transparent", color: "#6A6580" }),
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5";
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isActive) (e.currentTarget as HTMLButtonElement).style.color = "#6A6580";
+                          }}
+                        >
+                          {shortLabel}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-              );
-            })()}
+
+                {/* Textarea area — flex-1 so it fills remaining height */}
+                <div className="flex-1 flex flex-col px-4 py-3 min-h-0">
+                  <textarea
+                    value={noteDrafts[activeField]}
+                    onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [activeField]: e.target.value }))}
+                    onBlur={saveNotes}
+                    placeholder={NOTE_TABS.find((t) => t.field === activeField)!.placeholder}
+                    className="flex-1 resize-none focus:outline-none transition-colors"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      fontSize: 12,
+                      lineHeight: "1.7",
+                      color: "#EAE8F2",
+                      width: "100%",
+                    }}
+                    onFocus={(e) => { e.currentTarget.style.color = "#EAE8F2"; }}
+                  />
+                </div>
+
+                {/* Panel footer */}
+                <div
+                  className="px-4 py-2 shrink-0 flex items-center justify-between"
+                  style={{ borderTop: "0.5px solid rgba(139,130,190,0.08)" }}
+                >
+                  <p style={{ fontSize: 10, color: "#6A6580", fontStyle: "italic" }}>
+                    {savingNotes ? "Saving…" : `Edited by ${modalSession?.user?.name ?? "Unknown"}`}
+                  </p>
+                  <div
+                    style={{
+                      width: 5,
+                      height: 5,
+                      borderRadius: "50%",
+                      background: savingNotes ? "#F0B040" : "rgba(139,130,190,0.2)",
+                      transition: "background 0.3s",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -905,6 +1128,11 @@ function Column({
     </div>
   );
 }
+
+// ── Notes panel resize constants ──────────────────────────────────────────────
+const NOTES_DEFAULT_WIDTH = 300;
+const NOTES_MIN_WIDTH     = 260;
+const NOTES_MAX_WIDTH     = 520;
 
 // ── Pill style for command strip controls ─────────────────────────────────────
 const stripPillStyle: React.CSSProperties = {
