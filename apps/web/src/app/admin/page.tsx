@@ -927,6 +927,7 @@ export default function AdminPage() {
   const [search, setSearch] = useState("");
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [selectedTeam, setSelectedTeam] = useState("All Teams");
+  const [selectedPosition, setSelectedPosition] = useState("All Positions");
   const [renamingOpportunity, setRenamingOpportunity] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -970,10 +971,25 @@ export default function AdminPage() {
   }, [fetchApps]);
 
   const isAmbassadorBoard = applications.some((a) => a.track === "Ambassador");
+  const isPositionFilterable = !isAmbassadorBoard && applications.length > 0;
+
+  function splitRoles(role: string): string[] {
+    return role.split(",").map((r) => r.trim()).filter(Boolean);
+  }
+
+  const availablePositions = isPositionFilterable
+    ? Array.from(
+        new Set(applications.flatMap((a) => (a.role ? splitRoles(a.role) : [])))
+      ).sort()
+    : [];
 
   useEffect(() => {
     if (!isAmbassadorBoard) setSelectedTeam("All Teams");
   }, [isAmbassadorBoard]);
+
+  useEffect(() => {
+    setSelectedPosition("All Positions");
+  }, [selectedOpportunity]);
 
   const handleImportSuccess = useCallback(() => {
     fetchOpportunities(!selectedOpportunity);
@@ -1030,6 +1046,9 @@ export default function AdminPage() {
     if (isAmbassadorBoard && selectedTeam !== "All Teams") {
       const prefs = [a.rawData?._teamPreference1, a.rawData?._teamPreference2, a.rawData?._teamPreference3];
       if (!prefs.some((p) => p === selectedTeam)) return false;
+    }
+    if (isPositionFilterable && selectedPosition !== "All Positions") {
+      if (!splitRoles(a.role ?? "").includes(selectedPosition)) return false;
     }
     return true;
   });
@@ -1186,6 +1205,21 @@ export default function AdminPage() {
             <option value="All Teams">All Teams</option>
             {AMBASSADOR_TEAMS.map((t) => (
               <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        )}
+
+        {/* 2b. Position filter (only for non-Ambassador boards with multiple roles) */}
+        {isPositionFilterable && availablePositions.length > 1 && (
+          <select
+            value={selectedPosition}
+            onChange={(e) => setSelectedPosition(e.target.value)}
+            className="appearance-none cursor-pointer transition-colors"
+            style={stripPillStyle}
+          >
+            <option value="All Positions">All Positions</option>
+            {availablePositions.map((p) => (
+              <option key={p} value={p}>{p}</option>
             ))}
           </select>
         )}
