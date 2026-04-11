@@ -1,4 +1,4 @@
-import { normalizeData, normalizeAmbassadorData, parseRawCsv, detectCsvFormType } from "@/lib/parseCsv";
+import { normalizeData, normalizeAmbassadorData, normalizeEboardData, parseRawCsv, detectCsvFormType } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
@@ -32,6 +32,20 @@ export async function POST(request: Request) {
        { status: 400 }
      );
    }
+   // E-Board guards come first — they must take priority over the generic
+   // ambassador guard below, which would otherwise fire for formType=eboard/detectedType=ambassador.
+   if (detectedType === "eboard" && formType !== "eboard") {
+     return NextResponse.json(
+       { error: "This file looks like an E-Board form. Please select 'E-Board' as the form type." },
+       { status: 400 }
+     );
+   }
+   if (formType === "eboard" && detectedType !== "eboard") {
+     return NextResponse.json(
+       { error: "This file does not look like an E-Board form, but you selected E-Board. Please check your form type selection." },
+       { status: 400 }
+     );
+   }
    if (formType === "ambassador" && detectedType === "project") {
      return NextResponse.json(
        { error: "This file looks like a Project/Intern form, but you selected Ambassador. Please check your form type selection." },
@@ -45,9 +59,12 @@ export async function POST(request: Request) {
      );
    }
 
-   const cleanData = formType === "ambassador"
-     ? normalizeAmbassadorData(rawParsedData, opportunity)
-     : normalizeData(rawParsedData, opportunity);
+   const cleanData =
+     formType === "eboard"
+       ? normalizeEboardData(rawParsedData, opportunity)
+       : formType === "ambassador"
+       ? normalizeAmbassadorData(rawParsedData, opportunity)
+       : normalizeData(rawParsedData, opportunity);
 
    //track insert/skipped counts and collect errors for a summary response
    let inserted = 0;

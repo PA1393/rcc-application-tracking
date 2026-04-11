@@ -12,6 +12,10 @@ const AMBASSADOR_SIGNALS = [
   "what team(s) are you applying for as an ambassador?",
 ];
 
+const EBOARD_SIGNALS = [
+  "campaign video (1 minute)",
+];
+
 type ImportSummary = {
   inserted: number;
   updated: number;
@@ -98,7 +102,7 @@ export default function ImportButton({
   const [open, setOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
-  const [selectedFormType, setSelectedFormType] = useState<"project" | "ambassador">("project");
+  const [selectedFormType, setSelectedFormType] = useState<"project" | "ambassador" | "eboard">("project");
   const [detectedFormLabel, setDetectedFormLabel] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
@@ -129,9 +133,18 @@ export default function ImportButton({
     const result = Papa.parse(text, { header: true, preview: 1 });
     const headers = (result.meta.fields ?? []).map((h: string) => h.toLowerCase().trim());
 
-    const isAmbassador = AMBASSADOR_SIGNALS.some((s) => headers.includes(s));
-    setSelectedFormType(isAmbassador ? "ambassador" : "project");
-    setDetectedFormLabel(isAmbassador ? "Ambassador form detected" : "Project / Intern form detected");
+    // E-Board must be checked before Ambassador — they share a header
+    const isEboard     = EBOARD_SIGNALS.some((s) => headers.includes(s));
+    const isAmbassador = !isEboard && AMBASSADOR_SIGNALS.some((s) => headers.includes(s));
+    const detectedType = isEboard ? "eboard" : isAmbassador ? "ambassador" : "project";
+    setSelectedFormType(detectedType);
+    setDetectedFormLabel(
+      isEboard
+        ? "E-Board form detected"
+        : isAmbassador
+        ? "Ambassador form detected"
+        : "Project / Intern form detected"
+    );
   }
 
   async function handleImport() {
@@ -314,7 +327,7 @@ export default function ImportButton({
                   border: "0.5px solid rgba(139,130,190,0.12)",
                 }}
               >
-                {(["project", "ambassador"] as const).map((type) => (
+                {(["project", "ambassador", "eboard"] as const).map((type) => (
                   <button
                     key={type}
                     onClick={() => setSelectedFormType(type)}
@@ -331,7 +344,7 @@ export default function ImportButton({
                         : { background: "transparent", color: "#6A6580" }),
                     }}
                   >
-                    {type === "project" ? "Project / Intern" : "Ambassador"}
+                    {type === "project" ? "Project / Intern" : type === "eboard" ? "E-Board" : "Ambassador"}
                   </button>
                 ))}
               </div>

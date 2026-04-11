@@ -19,6 +19,7 @@ vi.mock("@/lib/parseCsv", () => ({
   detectCsvFormType:       vi.fn(),
   normalizeData:           vi.fn(),
   normalizeAmbassadorData: vi.fn(),
+  normalizeEboardData:     vi.fn(),
 }));
 
 // Mock upsertApplicant so the import route doesn't write to the real database.
@@ -26,7 +27,7 @@ vi.mock("@/lib/upsert", () => ({
   upsertApplicant: vi.fn(),
 }));
 
-import { parseRawCsv, detectCsvFormType, normalizeData, normalizeAmbassadorData } from "@/lib/parseCsv";
+import { parseRawCsv, detectCsvFormType, normalizeData, normalizeAmbassadorData, normalizeEboardData } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
 import { POST } from "@/app/api/import/route";
 
@@ -58,6 +59,7 @@ beforeEach(() => {
   vi.mocked(parseRawCsv).mockResolvedValue([RAW_ROW]);
   vi.mocked(normalizeData).mockReturnValue([VALID_ROW]);
   vi.mocked(normalizeAmbassadorData).mockReturnValue([VALID_ROW]);
+  vi.mocked(normalizeEboardData).mockReturnValue([VALID_ROW]);
   vi.mocked(upsertApplicant).mockResolvedValue({ isNew: true } as any);
 });
 
@@ -144,6 +146,65 @@ describe("POST /api/import — form type branching", () => {
     expect(data.updated).toBe(1);
     expect(data.skipped).toBe(0);
     expect(data.errors).toHaveLength(0);
+  });
+
+  // ── E-Board branching ──────────────────────────────────────────────────────
+
+  it("calls normalizeEboardData (not others) when formType is 'eboard'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("eboard");
+
+    const res = await POST(makeImportRequest("eboard"));
+    expect(res.status).toBe(200);
+
+    expect(normalizeEboardData).toHaveBeenCalledOnce();
+    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
+    expect(normalizeData).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when detected type is 'eboard' but formType is 'ambassador'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("eboard");
+
+    const res = await POST(makeImportRequest("ambassador"));
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toMatch(/e-board form/i);
+    expect(normalizeEboardData).not.toHaveBeenCalled();
+    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when detected type is 'eboard' but formType is 'project'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("eboard");
+
+    const res = await POST(makeImportRequest("project"));
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toMatch(/e-board form/i);
+    expect(normalizeEboardData).not.toHaveBeenCalled();
+    expect(normalizeData).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when formType is 'eboard' but detected type is 'ambassador'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador");
+
+    const res = await POST(makeImportRequest("eboard"));
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toMatch(/does not look like an e-board form/i);
+    expect(normalizeEboardData).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when formType is 'eboard' but detected type is 'project'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("project");
+
+    const res = await POST(makeImportRequest("eboard"));
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toMatch(/does not look like an e-board form/i);
+    expect(normalizeEboardData).not.toHaveBeenCalled();
   });
 
   it("skips invalid rows flagged by the normalizer and reports them in errors", async () => {

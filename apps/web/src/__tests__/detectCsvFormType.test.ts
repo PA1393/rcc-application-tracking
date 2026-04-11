@@ -63,4 +63,36 @@ describe("detectCsvFormType", () => {
     ];
     expect(detectCsvFormType(rows)).toBe("unknown");
   });
+
+  // ── E-Board detection ──────────────────────────────────────────────────────
+
+  it("returns 'eboard' when the row contains the campaign video header", () => {
+    const rows = [{ "Campaign Video (1 minute)": "https://youtu.be/example" }];
+    expect(detectCsvFormType(rows)).toBe("eboard");
+  });
+
+  it("returns 'eboard' even when the row also contains an ambassador signal header", () => {
+    // Critical ordering test: E-Board forms share "Which position are you applying for?"
+    // with Ambassador forms. E-Board must win because it is checked first.
+    const rows = [{
+      "Campaign Video (1 minute)": "https://youtu.be/example",
+      "Which position are you applying for?": "President",
+    }];
+    expect(detectCsvFormType(rows)).toBe("eboard");
+  });
+
+  it("returns 'ambassador' (not 'eboard') for an ambassador form without the campaign video header", () => {
+    const rows = [{ "What position are you applying for?": "Ambassador" }];
+    expect(detectCsvFormType(rows)).toBe("ambassador");
+  });
+
+  it("eboard detection is case-insensitive", () => {
+    const rows = [{ "CAMPAIGN VIDEO (1 MINUTE)": "https://youtu.be/example" }];
+    expect(detectCsvFormType(rows)).toBe("eboard");
+  });
+
+  it("eboard detection trims whitespace from headers", () => {
+    const rows = [{ "  campaign video (1 minute)  ": "https://youtu.be/example" }];
+    expect(detectCsvFormType(rows)).toBe("eboard");
+  });
 });

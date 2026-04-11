@@ -123,6 +123,31 @@ export function canonicalizeTeamName(rawName: string): string {
   return TEAM_ALIASES[cleaned] ?? rawName.trim();
 }
 
+export function normalizeEboardData(rawData: any[], opportunity: string): any[] {
+  return rawData.map((row) => {
+    const name  = (row["Full Name (First Last)"] ?? "").trim();
+    const email = (row["SJSU Email"] ?? "").trim().toLowerCase();
+    const role  = (row["Which position are you applying for?"] ?? "").trim();
+
+    const normalized: any = {
+      name,
+      email,
+      role,
+      track: "Ambassador",   // E-Board is a subtype of the Ambassador track
+      status: "To Review",
+      opportunity,
+      rawData: row,
+    };
+
+    if (!name || !email) {
+      normalized._invalid = true;
+      normalized._reason  = "Missing email or name";
+    }
+
+    return normalized;
+  });
+}
+
 export function normalizeAmbassadorData(rawData: any[], opportunity: string): any[] {
   return rawData.map((row) => {
     const name = (row["Name (First Last)"] ?? "").trim();
@@ -194,6 +219,11 @@ const AMBASSADOR_SIGNALS = [
   "what team(s) are you applying for as an ambassador?",
 ];
 
+// Headers that only appear on the E-Board Google Form
+const EBOARD_SIGNALS = [
+  "campaign video (1 minute)",
+];
+
 // Headers that only appear on Project / Intern Google Forms
 const PROJECT_SIGNALS = [
   "which position are you interested in? details on roles available!",
@@ -202,12 +232,18 @@ const PROJECT_SIGNALS = [
   "sjsu email address",
 ];
 
-export function detectCsvFormType(rawData: any[]): "ambassador" | "project" | "unknown" {
+export function detectCsvFormType(
+  rawData: any[]
+): "eboard" | "ambassador" | "project" | "unknown" {
   if (!rawData.length) return "unknown";
 
   // Normalise headers from the first row for case-insensitive comparison
   const headers = Object.keys(rawData[0]).map((h) => h.toLowerCase().trim());
 
+  // E-Board MUST be checked before Ambassador — they share
+  // "what position are you applying for?" as a header.
+  // The unique signal "campaign video (1 minute)" disambiguates.
+  if (EBOARD_SIGNALS.some((s) => headers.includes(s)))     return "eboard";
   if (AMBASSADOR_SIGNALS.some((s) => headers.includes(s))) return "ambassador";
   if (PROJECT_SIGNALS.some((s) => headers.includes(s)))    return "project";
   return "unknown";

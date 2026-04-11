@@ -1198,8 +1198,14 @@ export default function AdminPage() {
     fetchApps();
   }, [fetchApps]);
 
-  const isAmbassadorBoard = applications.some((a) => a.track === "Ambassador");
-  const isPositionFilterable = !isAmbassadorBoard && applications.length > 0;
+  // E-Board apps have track="Ambassador" but no _teamPreference1 key in rawData.
+  // Real Ambassador apps always have _teamPreference1 injected by normalizeAmbassadorData,
+  // even when empty. Use key presence (not truthiness) to avoid false-negatives on
+  // boards where all leads filled in blank preferences.
+  const hasAmbassadorTrack = applications.some((a) => a.track === "Ambassador");
+  const isEboardBoard = hasAmbassadorTrack && !applications.some((a) => "_teamPreference1" in (a.rawData ?? {}));
+  const isAmbassadorBoard = hasAmbassadorTrack && !isEboardBoard;
+  const isPositionFilterable = (!isAmbassadorBoard && applications.length > 0) || isEboardBoard;
 
   function splitRoles(role: string): string[] {
     return role.split(",").map((r) => r.trim()).filter(Boolean);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeData } from "@/lib/parseCsv";
+import { normalizeData, normalizeEboardData } from "@/lib/parseCsv";
 
 describe("normalizeData", () => {
   it("maps standard headers correctly", () => {
@@ -73,6 +73,71 @@ describe("normalizeData", () => {
     expect(result.email).toBe("grace@sjsu.edu");
     expect(result.name).toBe("Grace Xu");
     expect(result.role).toBe("Designer");
+    expect(result._invalid).toBeUndefined();
+  });
+});
+
+describe("normalizeEboardData", () => {
+  const OPPORTUNITY = "E-Board Elections 2026";
+
+  const FULL_ROW = {
+    "Full Name (First Last)": "Jane Doe",
+    "SJSU Email": "Jane.Doe@sjsu.edu",
+    "Which position are you applying for?": "President",
+    "Candidate Bio": "I love SJSU.",
+    "Campaign Video (1 minute)": "https://youtu.be/abc123",
+  };
+
+  it("maps E-Board headers to normalized fields", () => {
+    const [result] = normalizeEboardData([FULL_ROW], OPPORTUNITY);
+
+    expect(result.name).toBe("Jane Doe");
+    expect(result.email).toBe("jane.doe@sjsu.edu"); // lowercased
+    expect(result.role).toBe("President");
+    expect(result.opportunity).toBe(OPPORTUNITY);
+    expect(result._invalid).toBeUndefined();
+  });
+
+  it("sets track to 'Ambassador' (E-Board is an Ambassador subtype)", () => {
+    const [result] = normalizeEboardData([FULL_ROW], OPPORTUNITY);
+    expect(result.track).toBe("Ambassador");
+  });
+
+  it("sets status to 'To Review'", () => {
+    const [result] = normalizeEboardData([FULL_ROW], OPPORTUNITY);
+    expect(result.status).toBe("To Review");
+  });
+
+  it("preserves rawData on the normalized row", () => {
+    const [result] = normalizeEboardData([FULL_ROW], OPPORTUNITY);
+    expect(result.rawData).toBe(FULL_ROW);
+  });
+
+  it("flags row invalid when email is missing", () => {
+    const row = { ...FULL_ROW, "SJSU Email": "" };
+    const [result] = normalizeEboardData([row], OPPORTUNITY);
+    expect(result._invalid).toBe(true);
+    expect(result._reason).toMatch(/missing/i);
+  });
+
+  it("flags row invalid when name is missing", () => {
+    const row = { ...FULL_ROW, "Full Name (First Last)": "" };
+    const [result] = normalizeEboardData([row], OPPORTUNITY);
+    expect(result._invalid).toBe(true);
+    expect(result._reason).toMatch(/missing/i);
+  });
+
+  it("stamps opportunity onto every row", () => {
+    const rows = [FULL_ROW, { ...FULL_ROW, "SJSU Email": "other@sjsu.edu" }];
+    const results = normalizeEboardData(rows, OPPORTUNITY);
+    expect(results[0].opportunity).toBe(OPPORTUNITY);
+    expect(results[1].opportunity).toBe(OPPORTUNITY);
+  });
+
+  it("handles a missing role column gracefully (role is empty string, not _invalid)", () => {
+    const { "Which position are you applying for?": _dropped, ...rowNoRole } = FULL_ROW;
+    const [result] = normalizeEboardData([rowNoRole], OPPORTUNITY);
+    expect(result.role).toBe("");
     expect(result._invalid).toBeUndefined();
   });
 });
