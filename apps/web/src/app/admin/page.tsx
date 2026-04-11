@@ -192,12 +192,16 @@ function EmailDraftModal({
   onSent,
   canCancel,
   onCancel,
+  onDefer,
+  isManual,
 }: {
   app: Application;
   status: string;
   onSent: (wasSent: boolean) => void;
   canCancel: boolean;
   onCancel: () => Promise<void>;
+  onDefer: () => void;
+  isManual?: boolean;
 }) {
   const template = getEmailTemplate(status, {
     name: app.applicant.name,
@@ -366,6 +370,16 @@ function EmailDraftModal({
           >
             {canceling ? "Reverting..." : "Cancel"}
           </button>
+          {!isManual && !alreadySentAt && (
+            <button
+              onClick={onDefer}
+              disabled={sending || canceling}
+              className="flex-1 text-sm font-medium py-2.5 rounded-[8px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: "rgba(139,127,238,0.12)", color: "#8B7FEE", border: "0.5px solid rgba(139,127,238,0.25)" }}
+            >
+              Send Email Later
+            </button>
+          )}
           <button
             onClick={handleSend}
             disabled={sending || canceling}
@@ -423,6 +437,7 @@ function ApplicantModal({
   const [changingStatus, setChangingStatus] = useState(false);
   const [emailDraftStatus, setEmailDraftStatus] = useState<string | null>(null);
   const [previousEmailStatus, setPreviousEmailStatus] = useState<string | null>(null);
+  const [emailIsManual, setEmailIsManual] = useState(false);
   const [toastVisible, setToastVisible] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesPanelWidth, setNotesPanelWidth] = useState(NOTES_DEFAULT_WIDTH);
@@ -529,6 +544,11 @@ function ApplicantModal({
   }
 
   async function handleEmailCancel() {
+    if (emailIsManual) {
+      setEmailDraftStatus(null);
+      setEmailIsManual(false);
+      return;
+    }
     if (!previousEmailStatus) return;
     await fetch("/api/applications", {
       method: "PATCH",
@@ -552,10 +572,21 @@ function ApplicantModal({
         <EmailDraftModal
           app={activeApp}
           status={emailDraftStatus}
-          canCancel={emailDraftStatus !== "Accepted"}
+          canCancel={emailIsManual || emailDraftStatus !== "Accepted"}
           onCancel={handleEmailCancel}
+          onDefer={() => {
+            setEmailDraftStatus(null);
+            setPreviousEmailStatus(null);
+            setEmailIsManual(false);
+            onRefreshBoard();
+            fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
+              .then((r) => r.json())
+              .then((data: Application[]) => setAllApps(data));
+          }}
+          isManual={emailIsManual}
           onSent={(wasSent) => {
             setEmailDraftStatus(null);
+            setEmailIsManual(false);
             if (wasSent) setToastVisible(true);
             onRefreshBoard();
             fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
@@ -850,16 +881,16 @@ function ApplicantModal({
 
               {/* Email History */}
               {(() => {
-                const rows: { label: string; sentAt: string | null }[] = [];
+                const rows: { label: string; sentAt: string | null; emailStatus: string }[] = [];
                 const s = activeApp.status;
                 if (s === "Interviewing" || s === "Accepted" || s === "Rejected") {
-                  rows.push({ label: "Interview invite", sentAt: activeApp.interview_invite_sent });
+                  rows.push({ label: "Interview invite", sentAt: activeApp.interview_invite_sent, emailStatus: "Interviewing" });
                 }
                 if (s === "Accepted") {
-                  rows.push({ label: "Acceptance email", sentAt: activeApp.acceptance_sent_at });
+                  rows.push({ label: "Acceptance email", sentAt: activeApp.acceptance_sent_at, emailStatus: "Accepted" });
                 }
                 if (s === "Rejected") {
-                  rows.push({ label: "Rejection email", sentAt: activeApp.rejection_sent_at });
+                  rows.push({ label: "Rejection email", sentAt: activeApp.rejection_sent_at, emailStatus: "Rejected" });
                 }
                 if (rows.length === 0) return null;
                 return (
@@ -868,14 +899,35 @@ function ApplicantModal({
                       Email History
                     </p>
                     <div className="space-y-2">
-                      {rows.map(({ label, sentAt }) => (
+                      {rows.map(({ label, sentAt, emailStatus }) => (
                         <div key={label} className="flex items-center gap-2">
                           <span style={{ fontSize: 12, color: sentAt ? "#4ADE80" : "#6A6580" }}>✉</span>
                           <span style={{ fontSize: 12, color: "#A09BB5" }}>{label}</span>
                           {sentAt ? (
                             <span className="ml-auto" style={{ fontSize: 12, color: "#4ADE80" }}>{formatDateTime(sentAt)}</span>
                           ) : (
-                            <span className="ml-auto" style={{ fontSize: 12, color: "#6A6580" }}>not sent</span>
+                            <div className="ml-auto flex items-center gap-2">
+                              <span style={{ fontSize: 12, color: "#6A6580" }}>not sent</span>
+                              {emailStatus === s && (
+                                <button
+                                  onClick={() => {
+                                    setEmailIsManual(true);
+                                    setEmailDraftStatus(emailStatus);
+                                  }}
+                                  style={{
+                                    fontSize: 10,
+                                    padding: "2px 8px",
+                                    borderRadius: 4,
+                                    background: "rgba(139,127,238,0.12)",
+                                    color: "#8B7FEE",
+                                    border: "0.5px solid rgba(139,127,238,0.25)",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Send now
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       ))}

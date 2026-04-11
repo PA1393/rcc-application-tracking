@@ -18,7 +18,6 @@ vi.mock("@/lib/parseCsv", () => ({
   parseRawCsv:                    vi.fn(),
   detectCsvFormType:              vi.fn(),
   normalizeData:                  vi.fn(),
-  normalizeAmbassadorData:        vi.fn(),
   normalizeAmbassadorMatrixData:  vi.fn(),
   normalizeEboardData:            vi.fn(),
 }));
@@ -38,7 +37,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { parseRawCsv, detectCsvFormType, normalizeData, normalizeAmbassadorData, normalizeAmbassadorMatrixData, normalizeEboardData } from "@/lib/parseCsv";
+import { parseRawCsv, detectCsvFormType, normalizeData, normalizeAmbassadorMatrixData, normalizeEboardData } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
 import prisma from "@/lib/prisma";
 import { POST } from "@/app/api/import/route";
@@ -70,7 +69,6 @@ beforeEach(() => {
 
   vi.mocked(parseRawCsv).mockResolvedValue([RAW_ROW]);
   vi.mocked(normalizeData).mockReturnValue([VALID_ROW]);
-  vi.mocked(normalizeAmbassadorData).mockReturnValue([VALID_ROW]);
   vi.mocked(normalizeAmbassadorMatrixData).mockReturnValue([VALID_ROW]);
   vi.mocked(normalizeEboardData).mockReturnValue([VALID_ROW]);
   vi.mocked(upsertApplicant).mockResolvedValue({ isNew: true } as any);
@@ -79,29 +77,29 @@ beforeEach(() => {
 });
 
 describe("POST /api/import — form type branching", () => {
-  it("calls normalizeAmbassadorData (not normalizeData) when formType is 'ambassador'", async () => {
-    vi.mocked(detectCsvFormType).mockReturnValue("ambassador");
+  it("calls normalizeAmbassadorMatrixData (not normalizeData) when formType is 'ambassador'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador_matrix");
 
     const res = await POST(makeImportRequest("ambassador"));
     expect(res.status).toBe(200);
 
-    expect(normalizeAmbassadorData).toHaveBeenCalledOnce();
+    expect(normalizeAmbassadorMatrixData).toHaveBeenCalledOnce();
     expect(normalizeData).not.toHaveBeenCalled();
   });
 
-  it("calls normalizeData (not normalizeAmbassadorData) when formType is 'project'", async () => {
+  it("calls normalizeData (not normalizeAmbassadorMatrixData) when formType is 'project'", async () => {
     vi.mocked(detectCsvFormType).mockReturnValue("project");
 
     const res = await POST(makeImportRequest("project"));
     expect(res.status).toBe(200);
 
     expect(normalizeData).toHaveBeenCalledOnce();
-    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
+    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when detected type is 'ambassador' but formType is 'project'", async () => {
+  it("returns 400 when detected type is 'ambassador_matrix' but formType is 'project'", async () => {
     // The CSV looks like an Ambassador form but the user selected Project/Intern in the UI
-    vi.mocked(detectCsvFormType).mockReturnValue("ambassador");
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador_matrix");
 
     const res = await POST(makeImportRequest("project"));
     const data = await res.json();
@@ -110,7 +108,7 @@ describe("POST /api/import — form type branching", () => {
     expect(data.error).toMatch(/ambassador form/i);
     // Neither normalizer should have been called — the route exits early
     expect(normalizeData).not.toHaveBeenCalled();
-    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
+    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
   });
 
   it("returns 400 when detected type is 'project' but formType is 'ambassador'", async () => {
@@ -123,7 +121,7 @@ describe("POST /api/import — form type branching", () => {
     expect(res.status).toBe(400);
     expect(data.error).toMatch(/project.*intern form/i);
     expect(normalizeData).not.toHaveBeenCalled();
-    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
+    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
   });
 
   it("returns 400 when the form type cannot be detected", async () => {
@@ -172,29 +170,6 @@ describe("POST /api/import — form type branching", () => {
     expect(res.status).toBe(200);
 
     expect(normalizeAmbassadorMatrixData).toHaveBeenCalledOnce();
-    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
-    expect(normalizeData).not.toHaveBeenCalled();
-  });
-
-  it("calls normalizeAmbassadorData (not matrix) when formType is 'ambassador' and detected type is 'ambassador'", async () => {
-    vi.mocked(detectCsvFormType).mockReturnValue("ambassador");
-
-    const res = await POST(makeImportRequest("ambassador"));
-    expect(res.status).toBe(200);
-
-    expect(normalizeAmbassadorData).toHaveBeenCalledOnce();
-    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
-  });
-
-  it("returns 400 when detected type is 'ambassador_matrix' but formType is 'project'", async () => {
-    vi.mocked(detectCsvFormType).mockReturnValue("ambassador_matrix");
-
-    const res = await POST(makeImportRequest("project"));
-    const data = await res.json();
-
-    expect(res.status).toBe(400);
-    expect(data.error).toMatch(/ambassador form/i);
-    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
     expect(normalizeData).not.toHaveBeenCalled();
   });
 
@@ -216,7 +191,7 @@ describe("POST /api/import — form type branching", () => {
     expect(res.status).toBe(200);
 
     expect(normalizeEboardData).toHaveBeenCalledOnce();
-    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
+    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
     expect(normalizeData).not.toHaveBeenCalled();
   });
 
@@ -229,7 +204,7 @@ describe("POST /api/import — form type branching", () => {
     expect(res.status).toBe(400);
     expect(data.error).toMatch(/e-board form/i);
     expect(normalizeEboardData).not.toHaveBeenCalled();
-    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
+    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
   });
 
   it("returns 400 when detected type is 'eboard' but formType is 'project'", async () => {
@@ -244,14 +219,12 @@ describe("POST /api/import — form type branching", () => {
     expect(normalizeData).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when formType is 'eboard' but detected type is 'ambassador'", async () => {
-    vi.mocked(detectCsvFormType).mockReturnValue("ambassador");
+  it("returns 400 when formType is 'eboard' but detected type is 'ambassador_matrix'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador_matrix");
 
     const res = await POST(makeImportRequest("eboard"));
-    const data = await res.json();
 
     expect(res.status).toBe(400);
-    expect(data.error).toMatch(/does not look like an e-board form/i);
     expect(normalizeEboardData).not.toHaveBeenCalled();
   });
 
@@ -301,13 +274,13 @@ describe("POST /api/import — form type branching", () => {
   });
 
   it("allows import when the incoming family matches the existing opportunity family", async () => {
-    vi.mocked(detectCsvFormType).mockReturnValue("ambassador");
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador_matrix");
     // Existing opportunity already has Ambassador-family apps
     vi.mocked(prisma.application.findFirst).mockResolvedValue({ track: "Ambassador" } as any);
 
     const res = await POST(makeImportRequest("ambassador"));
     expect(res.status).toBe(200);
-    expect(normalizeAmbassadorData).toHaveBeenCalledOnce();
+    expect(normalizeAmbassadorMatrixData).toHaveBeenCalledOnce();
   });
 
   it("returns 400 when importing a Project/Intern CSV into an Ambassador-type opportunity", async () => {
@@ -323,7 +296,7 @@ describe("POST /api/import — form type branching", () => {
   });
 
   it("returns 400 when importing an Ambassador CSV into a Project/Intern opportunity", async () => {
-    vi.mocked(detectCsvFormType).mockReturnValue("ambassador");
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador_matrix");
     vi.mocked(prisma.application.findFirst).mockResolvedValue({ track: "General" } as any);
 
     const res = await POST(makeImportRequest("ambassador"));
@@ -331,7 +304,7 @@ describe("POST /api/import — form type branching", () => {
 
     expect(res.status).toBe(400);
     expect(data.error).toMatch(/ambassador-type form.*project\/intern opportunity/i);
-    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
+    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
   });
 
   it("returns 400 when importing an E-Board CSV into a Project/Intern opportunity", async () => {

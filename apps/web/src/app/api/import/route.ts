@@ -1,4 +1,4 @@
-import { normalizeData, normalizeAmbassadorData, normalizeAmbassadorMatrixData, normalizeEboardData, parseRawCsv, detectCsvFormType } from "@/lib/parseCsv";
+import { normalizeData, normalizeAmbassadorMatrixData, normalizeEboardData, parseRawCsv, detectCsvFormType } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
        { status: 400 }
      );
    }
-   if (formType !== "ambassador" && (detectedType === "ambassador" || detectedType === "ambassador_matrix")) {
+   if (formType !== "ambassador" && detectedType === "ambassador_matrix") {
      return NextResponse.json(
        { error: "This file looks like an Ambassador form, but you selected Project/Intern. Please check your form type selection." },
        { status: 400 }
@@ -91,10 +91,8 @@ export async function POST(request: Request) {
    const cleanData =
      formType === "eboard"
        ? normalizeEboardData(rawParsedData, opportunity)
-       : formType === "ambassador" && detectedType === "ambassador_matrix"
-       ? normalizeAmbassadorMatrixData(rawParsedData, opportunity)
        : formType === "ambassador"
-       ? normalizeAmbassadorData(rawParsedData, opportunity)
+       ? normalizeAmbassadorMatrixData(rawParsedData, opportunity)
        : normalizeData(rawParsedData, opportunity);
 
    //track insert/skipped counts and collect errors for a summary response

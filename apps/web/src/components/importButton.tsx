@@ -5,13 +5,6 @@ import Papa from "papaparse";
 
 const ADD_NEW = "__add_new__";
 
-const AMBASSADOR_SIGNALS = [
-  "what position are you applying for?",
-  "enter your #1 ambassador team preference:",
-  "enter your #1 lead ambassador team preference:",
-  "what team(s) are you applying for as an ambassador?",
-];
-
 const EBOARD_SIGNALS = [
   "campaign video (1 minute)",
 ];
@@ -140,12 +133,9 @@ export default function ImportButton({
     const headers = (result.meta.fields ?? []).map((h: string) => h.toLowerCase().trim());
 
     // E-Board must be checked before Ambassador — they share a header.
-    // Matrix form also maps to the "ambassador" user-facing category.
+    // Matrix form is the only supported Ambassador format.
     const isEboard     = EBOARD_SIGNALS.some((s) => headers.includes(s));
-    const isAmbassador = !isEboard && (
-      AMBASSADOR_MATRIX_SIGNALS.some((s) => headers.includes(s)) ||
-      AMBASSADOR_SIGNALS.some((s) => headers.includes(s))
-    );
+    const isAmbassador = !isEboard && AMBASSADOR_MATRIX_SIGNALS.some((s) => headers.includes(s));
     const detectedType = isEboard ? "eboard" : isAmbassador ? "ambassador" : "project";
     setSelectedFormType(detectedType);
     setDetectedFormLabel(
