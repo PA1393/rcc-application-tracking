@@ -109,6 +109,49 @@ const AMBASSADOR_TEAMS = [
   "Growth Analytics Team",
 ] as const;
 
+// ── Modal Q&A display helpers ─────────────────────────────────────────────────
+
+// Column prefix for the new Lead & Ambassador matrix form.
+// Raw bracketed position columns are suppressed in the Q&A display and replaced
+// with clean "1st / 2nd / 3rd Preference" rows from the stored helper keys.
+const MATRIX_POSITION_PREFIX = "Select the Position You're Applying For [";
+
+// Returns true if a Q&A value should be treated as unanswered and hidden.
+// Hides: empty strings, whitespace-only, null/undefined, and dash placeholders.
+// Does NOT hide "0", numeric strings, URLs, or other real short values.
+function isUnanswered(val: unknown): boolean {
+  if (val === null || val === undefined) return true;
+  const s = String(val).trim();
+  return s === "" || s === "—" || s === "-";
+}
+
+// Builds the ordered display entries for the modal Q&A section.
+// Matrix ambassador rows: suppresses bracketed position columns and injects
+//   clean "1st/2nd/3rd Preference" rows from the _teamPreference helper keys.
+// All rows: hides unanswered entries.
+function buildQaEntries(rawData: Record<string, string>): [string, string][] {
+  const isMatrix = Object.keys(rawData).some((k) => k.startsWith(MATRIX_POSITION_PREFIX));
+
+  const prefEntries: [string, string][] = isMatrix
+    ? (
+        [
+          ["1st Preference", rawData._teamPreference1 ?? ""],
+          ["2nd Preference", rawData._teamPreference2 ?? ""],
+          ["3rd Preference", rawData._teamPreference3 ?? ""],
+        ] as [string, string][]
+      ).filter(([, v]) => !isUnanswered(v))
+    : [];
+
+  const mainEntries = (Object.entries(rawData) as [string, string][]).filter(
+    ([key, val]) =>
+      !key.startsWith("_") &&
+      !(isMatrix && key.startsWith(MATRIX_POSITION_PREFIX)) &&
+      !isUnanswered(val)
+  );
+
+  return [...prefEntries, ...mainEntries];
+}
+
 // ── Notes tab helpers ─────────────────────────────────────────────────────────
 
 type NoteField = "application_notes" | "interview_notes" | "decision_notes";
@@ -703,11 +746,14 @@ function ApplicantModal({
             <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 min-w-0">
 
               {/* Q&A section — divider-separated, no card boxes */}
-              {activeApp.rawData && Object.keys(activeApp.rawData).length > 0 ? (
-                <div>
-                  {Object.entries(activeApp.rawData)
-                    .filter(([key]) => !key.startsWith("_"))
-                    .map(([question, answer], i, arr) => (
+              {(() => {
+                const qaEntries = activeApp.rawData ? buildQaEntries(activeApp.rawData) : [];
+                if (qaEntries.length === 0) {
+                  return <p style={{ fontSize: 13, color: "#6A6580", fontStyle: "italic" }}>No form responses recorded.</p>;
+                }
+                return (
+                  <div>
+                    {qaEntries.map(([question, answer], i, arr) => (
                       <div
                         key={question}
                         className="py-3"
@@ -717,14 +763,13 @@ function ApplicantModal({
                           {question}
                         </p>
                         <p className="whitespace-pre-wrap leading-relaxed" style={{ fontSize: 13, color: "#EAE8F2" }}>
-                          {String(answer) || "—"}
+                          {String(answer)}
                         </p>
                       </div>
                     ))}
-                </div>
-              ) : (
-                <p style={{ fontSize: 13, color: "#6A6580", fontStyle: "italic" }}>No form responses recorded.</p>
-              )}
+                  </div>
+                );
+              })()}
 
               {/* Notes — tabbed (shown at bottom only when side panel is closed) */}
               {!notesOpen && (
@@ -1204,7 +1249,11 @@ export default function AdminPage() {
   // boards where all leads filled in blank preferences.
   const hasAmbassadorTrack = applications.some((a) => a.track === "Ambassador");
   const isEboardBoard = hasAmbassadorTrack && !applications.some((a) => "_teamPreference1" in (a.rawData ?? {}));
-  const isAmbassadorBoard = hasAmbassadorTrack && !isEboardBoard;
+  // Matrix Ambassador boards have the bracketed position columns in rawData.
+  // They need a role/preference filter instead of the old team filter.
+  const isMatrixAmbassadorBoard = hasAmbassadorTrack && !isEboardBoard &&
+    applications.some((a) => Object.keys(a.rawData ?? {}).some((k) => k.startsWith(MATRIX_POSITION_PREFIX)));
+  const isAmbassadorBoard = hasAmbassadorTrack && !isEboardBoard && !isMatrixAmbassadorBoard;
   const isPositionFilterable = (!isAmbassadorBoard && applications.length > 0) || isEboardBoard;
 
   function splitRoles(role: string): string[] {
@@ -1213,7 +1262,15 @@ export default function AdminPage() {
 
   const availablePositions = isPositionFilterable
     ? Array.from(
-        new Set(applications.flatMap((a) => (a.role ? splitRoles(a.role) : [])))
+        new Set(
+          isMatrixAmbassadorBoard
+            // Collect all three ranked preferences so every selectable role appears
+            ? applications.flatMap((a) =>
+                [a.rawData?._teamPreference1, a.rawData?._teamPreference2, a.rawData?._teamPreference3]
+                  .filter((p): p is string => Boolean(p))
+              )
+            : applications.flatMap((a) => (a.role ? splitRoles(a.role) : []))
+        )
       ).sort()
     : [];
 
@@ -1282,7 +1339,12 @@ export default function AdminPage() {
       if (!prefs.some((p) => p === selectedTeam)) return false;
     }
     if (isPositionFilterable && selectedPosition !== "All Positions") {
-      if (!splitRoles(a.role ?? "").includes(selectedPosition)) return false;
+      if (isMatrixAmbassadorBoard) {
+        const prefs = [a.rawData?._teamPreference1, a.rawData?._teamPreference2, a.rawData?._teamPreference3];
+        if (!prefs.some((p) => p === selectedPosition)) return false;
+      } else {
+        if (!splitRoles(a.role ?? "").includes(selectedPosition)) return false;
+      }
     }
     return true;
   });

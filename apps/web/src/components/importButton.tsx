@@ -16,6 +16,12 @@ const EBOARD_SIGNALS = [
   "campaign video (1 minute)",
 ];
 
+// Unique signal for the new Lead & Ambassador matrix form.
+// The portfolio question only appears on this form.
+const AMBASSADOR_MATRIX_SIGNALS = [
+  "if you are applying for graphic design lead or publicity vice president, please link your portfolio.",
+];
+
 type ImportSummary = {
   inserted: number;
   updated: number;
@@ -133,9 +139,13 @@ export default function ImportButton({
     const result = Papa.parse(text, { header: true, preview: 1 });
     const headers = (result.meta.fields ?? []).map((h: string) => h.toLowerCase().trim());
 
-    // E-Board must be checked before Ambassador — they share a header
+    // E-Board must be checked before Ambassador — they share a header.
+    // Matrix form also maps to the "ambassador" user-facing category.
     const isEboard     = EBOARD_SIGNALS.some((s) => headers.includes(s));
-    const isAmbassador = !isEboard && AMBASSADOR_SIGNALS.some((s) => headers.includes(s));
+    const isAmbassador = !isEboard && (
+      AMBASSADOR_MATRIX_SIGNALS.some((s) => headers.includes(s)) ||
+      AMBASSADOR_SIGNALS.some((s) => headers.includes(s))
+    );
     const detectedType = isEboard ? "eboard" : isAmbassador ? "ambassador" : "project";
     setSelectedFormType(detectedType);
     setDetectedFormLabel(

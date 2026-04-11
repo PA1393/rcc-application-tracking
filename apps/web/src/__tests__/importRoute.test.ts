@@ -15,11 +15,12 @@ vi.mock("@/lib/auth", () => ({
 // Mock parseCsv so we control what the route "reads" from the CSV without touching
 // the filesystem or real PapaParse logic.
 vi.mock("@/lib/parseCsv", () => ({
-  parseRawCsv:             vi.fn(),
-  detectCsvFormType:       vi.fn(),
-  normalizeData:           vi.fn(),
-  normalizeAmbassadorData: vi.fn(),
-  normalizeEboardData:     vi.fn(),
+  parseRawCsv:                    vi.fn(),
+  detectCsvFormType:              vi.fn(),
+  normalizeData:                  vi.fn(),
+  normalizeAmbassadorData:        vi.fn(),
+  normalizeAmbassadorMatrixData:  vi.fn(),
+  normalizeEboardData:            vi.fn(),
 }));
 
 // Mock upsertApplicant so the import route doesn't write to the real database.
@@ -27,8 +28,19 @@ vi.mock("@/lib/upsert", () => ({
   upsertApplicant: vi.fn(),
 }));
 
-import { parseRawCsv, detectCsvFormType, normalizeData, normalizeAmbassadorData, normalizeEboardData } from "@/lib/parseCsv";
+// Mock prisma so the opportunity-family compatibility check doesn't hit a real DB.
+// Default: findFirst returns null (new opportunity — no compatibility concern).
+vi.mock("@/lib/prisma", () => ({
+  default: {
+    application: {
+      findFirst: vi.fn(),
+    },
+  },
+}));
+
+import { parseRawCsv, detectCsvFormType, normalizeData, normalizeAmbassadorData, normalizeAmbassadorMatrixData, normalizeEboardData } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
+import prisma from "@/lib/prisma";
 import { POST } from "@/app/api/import/route";
 
 // A minimal valid CSV string — content doesn't matter because parseRawCsv is mocked,
@@ -59,8 +71,11 @@ beforeEach(() => {
   vi.mocked(parseRawCsv).mockResolvedValue([RAW_ROW]);
   vi.mocked(normalizeData).mockReturnValue([VALID_ROW]);
   vi.mocked(normalizeAmbassadorData).mockReturnValue([VALID_ROW]);
+  vi.mocked(normalizeAmbassadorMatrixData).mockReturnValue([VALID_ROW]);
   vi.mocked(normalizeEboardData).mockReturnValue([VALID_ROW]);
   vi.mocked(upsertApplicant).mockResolvedValue({ isNew: true } as any);
+  // Default: no existing applications for this opportunity (new opportunity — allow all imports)
+  vi.mocked(prisma.application.findFirst).mockResolvedValue(null);
 });
 
 describe("POST /api/import — form type branching", () => {
@@ -148,6 +163,50 @@ describe("POST /api/import — form type branching", () => {
     expect(data.errors).toHaveLength(0);
   });
 
+  // ── Ambassador matrix branching ───────────────────────────────────────────
+
+  it("calls normalizeAmbassadorMatrixData when formType is 'ambassador' and detected type is 'ambassador_matrix'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador_matrix");
+
+    const res = await POST(makeImportRequest("ambassador"));
+    expect(res.status).toBe(200);
+
+    expect(normalizeAmbassadorMatrixData).toHaveBeenCalledOnce();
+    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
+    expect(normalizeData).not.toHaveBeenCalled();
+  });
+
+  it("calls normalizeAmbassadorData (not matrix) when formType is 'ambassador' and detected type is 'ambassador'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador");
+
+    const res = await POST(makeImportRequest("ambassador"));
+    expect(res.status).toBe(200);
+
+    expect(normalizeAmbassadorData).toHaveBeenCalledOnce();
+    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when detected type is 'ambassador_matrix' but formType is 'project'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador_matrix");
+
+    const res = await POST(makeImportRequest("project"));
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toMatch(/ambassador form/i);
+    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
+    expect(normalizeData).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when detected type is 'ambassador_matrix' but formType is 'eboard'", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador_matrix");
+
+    const res = await POST(makeImportRequest("eboard"));
+
+    expect(res.status).toBe(400);
+    expect(normalizeAmbassadorMatrixData).not.toHaveBeenCalled();
+  });
+
   // ── E-Board branching ──────────────────────────────────────────────────────
 
   it("calls normalizeEboardData (not others) when formType is 'eboard'", async () => {
@@ -228,5 +287,73 @@ describe("POST /api/import — form type branching", () => {
     expect(data.errors).toHaveLength(1);
     // upsertApplicant should only have been called for the one valid row
     expect(upsertApplicant).toHaveBeenCalledOnce();
+  });
+
+  // ── Opportunity-family compatibility checks ────────────────────────────────
+
+  it("allows import when the opportunity is new (no existing applications)", async () => {
+    // Default beforeEach: findFirst returns null — new opportunity
+    vi.mocked(detectCsvFormType).mockReturnValue("project");
+
+    const res = await POST(makeImportRequest("project"));
+    expect(res.status).toBe(200);
+    expect(normalizeData).toHaveBeenCalledOnce();
+  });
+
+  it("allows import when the incoming family matches the existing opportunity family", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador");
+    // Existing opportunity already has Ambassador-family apps
+    vi.mocked(prisma.application.findFirst).mockResolvedValue({ track: "Ambassador" } as any);
+
+    const res = await POST(makeImportRequest("ambassador"));
+    expect(res.status).toBe(200);
+    expect(normalizeAmbassadorData).toHaveBeenCalledOnce();
+  });
+
+  it("returns 400 when importing a Project/Intern CSV into an Ambassador-type opportunity", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("project");
+    vi.mocked(prisma.application.findFirst).mockResolvedValue({ track: "Ambassador" } as any);
+
+    const res = await POST(makeImportRequest("project"));
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toMatch(/project\/intern form.*ambassador-type opportunity/i);
+    expect(normalizeData).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when importing an Ambassador CSV into a Project/Intern opportunity", async () => {
+    vi.mocked(detectCsvFormType).mockReturnValue("ambassador");
+    vi.mocked(prisma.application.findFirst).mockResolvedValue({ track: "General" } as any);
+
+    const res = await POST(makeImportRequest("ambassador"));
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toMatch(/ambassador-type form.*project\/intern opportunity/i);
+    expect(normalizeAmbassadorData).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when importing an E-Board CSV into a Project/Intern opportunity", async () => {
+    // E-Board is ambassador-family — same rejection logic
+    vi.mocked(detectCsvFormType).mockReturnValue("eboard");
+    vi.mocked(prisma.application.findFirst).mockResolvedValue({ track: "General" } as any);
+
+    const res = await POST(makeImportRequest("eboard"));
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toMatch(/ambassador-type form.*project\/intern opportunity/i);
+    expect(normalizeEboardData).not.toHaveBeenCalled();
+  });
+
+  it("allows an E-Board import into an existing Ambassador-family opportunity", async () => {
+    // E-Board and Ambassador are in the same family bucket
+    vi.mocked(detectCsvFormType).mockReturnValue("eboard");
+    vi.mocked(prisma.application.findFirst).mockResolvedValue({ track: "Ambassador" } as any);
+
+    const res = await POST(makeImportRequest("eboard"));
+    expect(res.status).toBe(200);
+    expect(normalizeEboardData).toHaveBeenCalledOnce();
   });
 });

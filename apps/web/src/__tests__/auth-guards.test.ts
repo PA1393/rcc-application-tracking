@@ -15,6 +15,11 @@ vi.mock("@/lib/prisma", () => ({
       update: vi.fn(),
       delete: vi.fn(),
     },
+    application: {
+      // Default: null = new opportunity, so the import route proceeds past the
+      // opportunity-family check without blocking.
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 

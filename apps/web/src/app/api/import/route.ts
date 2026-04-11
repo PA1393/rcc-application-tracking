@@ -1,7 +1,8 @@
-import { normalizeData, normalizeAmbassadorData, normalizeEboardData, parseRawCsv, detectCsvFormType } from "@/lib/parseCsv";
+import { normalizeData, normalizeAmbassadorData, normalizeAmbassadorMatrixData, normalizeEboardData, parseRawCsv, detectCsvFormType } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
  //because applicant responses can be very long, Papaparse can handle long paragraph responses without columns breaking
 
 
@@ -52,16 +53,46 @@ export async function POST(request: Request) {
        { status: 400 }
      );
    }
-   if (formType !== "ambassador" && detectedType === "ambassador") {
+   if (formType !== "ambassador" && (detectedType === "ambassador" || detectedType === "ambassador_matrix")) {
      return NextResponse.json(
        { error: "This file looks like an Ambassador form, but you selected Project/Intern. Please check your form type selection." },
        { status: 400 }
      );
    }
 
+   // ── Opportunity-family compatibility check ───────────────────────────────
+   // Map the incoming form to a broad family bucket.
+   // E-Board and all Ambassador subtypes are ambassador-family.
+   const incomingFamily = (formType === "ambassador" || formType === "eboard") ? "Ambassador" : "General";
+
+   if (opportunity) {
+     const existing = await prisma.application.findFirst({
+       where: { opportunity },
+       select: { track: true },
+     });
+     if (existing) {
+       // existing.track is "Ambassador" or "General" — set by normalizers at import time
+       if (existing.track === "Ambassador" && incomingFamily === "General") {
+         return NextResponse.json(
+           { error: "This file is a Project/Intern form and cannot be imported into an Ambassador-type opportunity." },
+           { status: 400 }
+         );
+       }
+       if (existing.track === "General" && incomingFamily === "Ambassador") {
+         return NextResponse.json(
+           { error: "This file is an Ambassador-type form and cannot be imported into a Project/Intern opportunity." },
+           { status: 400 }
+         );
+       }
+     }
+     // existing === null means this is a new opportunity — allow the import
+   }
+
    const cleanData =
      formType === "eboard"
        ? normalizeEboardData(rawParsedData, opportunity)
+       : formType === "ambassador" && detectedType === "ambassador_matrix"
+       ? normalizeAmbassadorMatrixData(rawParsedData, opportunity)
        : formType === "ambassador"
        ? normalizeAmbassadorData(rawParsedData, opportunity)
        : normalizeData(rawParsedData, opportunity);

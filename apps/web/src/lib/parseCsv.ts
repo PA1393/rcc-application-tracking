@@ -123,6 +123,69 @@ export function canonicalizeTeamName(rawName: string): string {
   return TEAM_ALIASES[cleaned] ?? rawName.trim();
 }
 
+// ── Ambassador matrix normalizer ──────────────────────────────────────────────
+//
+// The updated Lead & Ambassador Google Form exports one column per role, e.g.:
+//   "Select the Position You're Applying For [Workshops Lead]"
+//   "Select the Position You're Applying For [Case Lead]"
+// Each cell contains "1st Preference", "2nd Preference", "3rd Preference", or empty.
+// We scan all such columns in source order and assign the first match per slot.
+// First-match-wins handles dirty historical rows where multiple cells share the same
+// preference rank.
+
+const AMBASSADOR_MATRIX_COLUMN_PREFIX = "Select the Position You're Applying For [";
+
+export function normalizeAmbassadorMatrixData(rawData: any[], opportunity: string): any[] {
+  return rawData.map((row) => {
+    const name  = (row["Full Name (First Last)"] ?? "").trim();
+    const email = (row["SJSU Email"] ?? "").trim().toLowerCase();
+
+    let pref1 = "";
+    let pref2 = "";
+    let pref3 = "";
+
+    // Iterate headers in column order so first match wins on duplicate preference markers
+    for (const header of Object.keys(row)) {
+      if (!header.startsWith(AMBASSADOR_MATRIX_COLUMN_PREFIX)) continue;
+
+      // Extract role name from inside the trailing brackets
+      const closeIdx = header.lastIndexOf("]");
+      if (closeIdx === -1) continue;
+      const roleName = header.slice(AMBASSADOR_MATRIX_COLUMN_PREFIX.length, closeIdx).trim();
+
+      const cellValue = (row[header] ?? "").trim();
+      if      (cellValue === "1st Preference" && !pref1) pref1 = roleName;
+      else if (cellValue === "2nd Preference" && !pref2) pref2 = roleName;
+      else if (cellValue === "3rd Preference" && !pref3) pref3 = roleName;
+    }
+
+    const normalized: any = {
+      name,
+      email,
+      role: pref1,   // primary role = first preference
+      track: "Ambassador",
+      status: "To Review",
+      opportunity,
+      teamPreference1: pref1,
+      teamPreference2: pref2,
+      teamPreference3: pref3,
+      rawData: {
+        ...row,
+        _teamPreference1: pref1,
+        _teamPreference2: pref2,
+        _teamPreference3: pref3,
+      },
+    };
+
+    if (!name || !email) {
+      normalized._invalid = true;
+      normalized._reason  = "Missing email or name";
+    }
+
+    return normalized;
+  });
+}
+
 export function normalizeEboardData(rawData: any[], opportunity: string): any[] {
   return rawData.map((row) => {
     const name  = (row["Full Name (First Last)"] ?? "").trim();
@@ -224,6 +287,12 @@ const EBOARD_SIGNALS = [
   "campaign video (1 minute)",
 ];
 
+// Header unique to the new Lead & Ambassador matrix Google Form.
+// The portfolio question only appears on this form and is safe to use as the detection signal.
+const AMBASSADOR_MATRIX_SIGNALS = [
+  "if you are applying for graphic design lead or publicity vice president, please link your portfolio.",
+];
+
 // Headers that only appear on Project / Intern Google Forms
 const PROJECT_SIGNALS = [
   "which position are you interested in? details on roles available!",
@@ -234,7 +303,7 @@ const PROJECT_SIGNALS = [
 
 export function detectCsvFormType(
   rawData: any[]
-): "eboard" | "ambassador" | "project" | "unknown" {
+): "eboard" | "ambassador" | "ambassador_matrix" | "project" | "unknown" {
   if (!rawData.length) return "unknown";
 
   // Normalise headers from the first row for case-insensitive comparison
@@ -243,8 +312,11 @@ export function detectCsvFormType(
   // E-Board MUST be checked before Ambassador — they share
   // "what position are you applying for?" as a header.
   // The unique signal "campaign video (1 minute)" disambiguates.
-  if (EBOARD_SIGNALS.some((s) => headers.includes(s)))     return "eboard";
-  if (AMBASSADOR_SIGNALS.some((s) => headers.includes(s))) return "ambassador";
-  if (PROJECT_SIGNALS.some((s) => headers.includes(s)))    return "project";
+  if (EBOARD_SIGNALS.some((s) => headers.includes(s)))              return "eboard";
+  // Matrix form is detected by a question unique to that form before falling
+  // through to the generic Ambassador signal check.
+  if (AMBASSADOR_MATRIX_SIGNALS.some((s) => headers.includes(s)))  return "ambassador_matrix";
+  if (AMBASSADOR_SIGNALS.some((s) => headers.includes(s)))          return "ambassador";
+  if (PROJECT_SIGNALS.some((s) => headers.includes(s)))             return "project";
   return "unknown";
 }

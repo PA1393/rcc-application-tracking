@@ -64,6 +64,37 @@ describe("detectCsvFormType", () => {
     expect(detectCsvFormType(rows)).toBe("unknown");
   });
 
+  // ── Ambassador matrix detection ───────────────────────────────────────────
+
+  it("returns 'ambassador_matrix' when the row contains the portfolio question header", () => {
+    const rows = [{
+      "Full Name (First Last)": "Jane Doe",
+      "SJSU Email": "jane@sjsu.edu",
+      "If you are applying for Graphic Design Lead or Publicity Vice President, please link your portfolio.": "",
+      "Select the Position You're Applying For [Workshops Lead]": "1st Preference",
+    }];
+    expect(detectCsvFormType(rows)).toBe("ambassador_matrix");
+  });
+
+  it("ambassador_matrix detection is case-insensitive", () => {
+    const rows = [{
+      "IF YOU ARE APPLYING FOR GRAPHIC DESIGN LEAD OR PUBLICITY VICE PRESIDENT, PLEASE LINK YOUR PORTFOLIO.": "",
+    }];
+    expect(detectCsvFormType(rows)).toBe("ambassador_matrix");
+  });
+
+  it("ambassador_matrix detection trims whitespace from headers", () => {
+    const rows = [{
+      "  if you are applying for graphic design lead or publicity vice president, please link your portfolio.  ": "",
+    }];
+    expect(detectCsvFormType(rows)).toBe("ambassador_matrix");
+  });
+
+  it("does NOT return 'ambassador_matrix' for the old ambassador form (no portfolio header)", () => {
+    const rows = [{ "What position are you applying for?": "Ambassador" }];
+    expect(detectCsvFormType(rows)).toBe("ambassador");
+  });
+
   // ── E-Board detection ──────────────────────────────────────────────────────
 
   it("returns 'eboard' when the row contains the campaign video header", () => {
