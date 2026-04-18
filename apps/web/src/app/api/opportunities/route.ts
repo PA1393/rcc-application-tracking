@@ -1,8 +1,12 @@
 import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 
 // PATCH /api/opportunities  body: { oldName, newName }
 export async function PATCH(request: Request) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
+
   const body = await request.json();
   const { oldName, newName: rawNew } = body;
 

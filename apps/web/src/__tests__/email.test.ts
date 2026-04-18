@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import prisma from "@/lib/prisma";
 
+// Mock auth so the new guard in the email route passes without loading next-auth providers.
+vi.mock("@/lib/auth", () => ({
+  auth: vi.fn().mockResolvedValue({ user: { id: "u-test", email: "test@sjsu.edu" }, expires: "2099-01-01" }),
+}));
+
 // Replace the real sendEmail function with a fake one so tests never open a real
 // SMTP connection to Gmail. vi.mock() is hoisted to the top of the file at
 // compile time, so it intercepts the module before any import below can use it.

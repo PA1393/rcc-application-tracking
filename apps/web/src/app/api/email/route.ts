@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
+import { auth } from "@/lib/auth";
 
 type TimestampField = "interview_invite_sent" | "acceptance_sent_at" | "rejection_sent_at";
 
@@ -18,6 +19,9 @@ function bodyToHtml(text: string): string {
 }
 
 export async function POST(request: Request) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
+
   const { applicationId, subject, body, to: toOverride } = await request.json() as {
     applicationId: string;
     subject: string;

@@ -1,4 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+vi.mock("@/lib/auth", () => ({
+  auth: vi.fn().mockResolvedValue({ user: { id: "u-test", email: "test@sjsu.edu" }, expires: "2099-01-01" }),
+}));
+
 import prisma from "@/lib/prisma";
 import { GET, PATCH } from "@/app/api/applications/route";
 

@@ -1,12 +1,16 @@
 import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { acceptApplicant } from "@/lib/placement";
+import { auth } from "@/lib/auth";
 
 // GET /api/applications?opportunities=true      → distinct opportunity list
 // GET /api/applications?opportunity=<name>      → all applications for that opportunity
 // GET /api/applications?roles=true              → distinct role list (legacy)
 // GET /api/applications?applicantId=<id>        → all applications for one applicant
 export async function GET(request: Request) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
+
   const { searchParams } = new URL(request.url);
 
   if (searchParams.get("opportunities") === "true") {
@@ -57,6 +61,9 @@ export async function GET(request: Request) {
 
 // PATCH /api/applications  body: { id, status?, interview_notes?, application_notes?, decision_notes? }
 export async function PATCH(request: Request) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
+
   const body = await request.json();
   const { id, status, interview_notes, application_notes, decision_notes } = body;
 
