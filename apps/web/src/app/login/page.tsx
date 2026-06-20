@@ -82,11 +82,13 @@ function LoginFormInner() {
       case "CredentialsSignin":
         setError("Invalid email or password.");
         break;
+      case "OAuthAccountNotLinked":
+        setError("This Google account isn't linked yet. Ask an admin to enable account linking, or contact support.");
+        break;
       case "Configuration":
       case "OAuthSignin":
       case "OAuthCallback":
       case "OAuthCreateAccount":
-      case "OAuthAccountNotLinked":
         setError("Google sign-in is currently unavailable. Check server configuration.");
         break;
       case "AccessDenied":

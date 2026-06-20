@@ -42,6 +42,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      // Seeded User rows have no linked Account; without this flag, the first
+      // sign-in throws OAuthAccountNotLinked. Safe for Google (verifies email).
+      allowDangerousEmailAccountLinking: true,
     }),
   ],
   callbacks: {

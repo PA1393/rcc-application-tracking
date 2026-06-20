@@ -470,8 +470,11 @@ function ApplicantModal({
 
   useEffect(() => {
     fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
-      .then((r) => r.json())
-      .then((data: Application[]) => setAllApps(data));
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => [])
+      .then((data: unknown) => {
+        setAllApps(Array.isArray(data) ? (data as Application[]) : []);
+      });
   }, [initialApp.applicant_id]);
 
   useEffect(() => {
@@ -508,12 +511,15 @@ function ApplicantModal({
 
   async function saveNotes() {
     setSavingNotes(true);
-    await fetch("/api/applications", {
+    const res = await fetch("/api/applications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: activeApp.id, [activeField]: noteDrafts[activeField] }),
     });
     setSavingNotes(false);
+    if (!res.ok) {
+      window.alert("Failed to save notes. Please sign in again and retry.");
+    }
   }
 
   async function confirmStatusChange() {
@@ -522,11 +528,18 @@ function ApplicantModal({
 
     const previousStatus = activeApp.status;
 
-    await fetch("/api/applications", {
+    const res = await fetch("/api/applications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: activeApp.id, status: pendingStatus }),
     });
+
+    if (!res.ok) {
+      setChangingStatus(false);
+      setPendingStatus(null);
+      window.alert("Failed to update status. Please sign in again and retry.");
+      return;
+    }
 
     const confirmedStatus = pendingStatus;
 
@@ -550,11 +563,15 @@ function ApplicantModal({
       return;
     }
     if (!previousEmailStatus) return;
-    await fetch("/api/applications", {
+    const res = await fetch("/api/applications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: activeApp.id, status: previousEmailStatus }),
     });
+    if (!res.ok) {
+      window.alert("Failed to revert status. Please sign in again and retry.");
+      return;
+    }
     const reverted = previousEmailStatus;
     setAllApps((prev) =>
       prev.map((a) => (a.id === activeApp.id ? { ...a, status: reverted } : a))
@@ -580,8 +597,11 @@ function ApplicantModal({
             setEmailIsManual(false);
             onRefreshBoard();
             fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
-              .then((r) => r.json())
-              .then((data: Application[]) => setAllApps(data));
+              .then((r) => (r.ok ? r.json() : []))
+              .catch(() => [])
+              .then((data: unknown) => {
+                setAllApps(Array.isArray(data) ? (data as Application[]) : []);
+              });
           }}
           isManual={emailIsManual}
           onSent={(wasSent) => {
@@ -590,8 +610,11 @@ function ApplicantModal({
             if (wasSent) setToastVisible(true);
             onRefreshBoard();
             fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
-              .then((r) => r.json())
-              .then((data: Application[]) => setAllApps(data));
+              .then((r) => (r.ok ? r.json() : []))
+              .catch(() => [])
+              .then((data: unknown) => {
+                setAllApps(Array.isArray(data) ? (data as Application[]) : []);
+              });
           }}
         />
       )}
@@ -1267,11 +1290,12 @@ export default function AdminPage() {
 
   const fetchOpportunities = useCallback((autoSelect = false) => {
     fetch("/api/applications?opportunities=true")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : []))
       .catch(() => [])
-      .then((data: string[]) => {
-        setOpportunities(data);
-        if (autoSelect && data.length > 0) setSelectedOpportunity(data[0]);
+      .then((data: unknown) => {
+        const list = Array.isArray(data) ? (data as string[]) : [];
+        setOpportunities(list);
+        if (autoSelect && list.length > 0) setSelectedOpportunity(list[0]);
       });
   }, []);
 
@@ -1283,10 +1307,10 @@ export default function AdminPage() {
     if (!selectedOpportunity) return;
     setLoadingApps(true);
     fetch(`/api/applications?opportunity=${encodeURIComponent(selectedOpportunity)}`)
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : []))
       .catch(() => [])
-      .then((data: Application[]) => {
-        setApplications(data);
+      .then((data: unknown) => {
+        setApplications(Array.isArray(data) ? (data as Application[]) : []);
         setLoadingApps(false);
       });
   }, [selectedOpportunity]);
@@ -1367,10 +1391,10 @@ export default function AdminPage() {
         return;
       }
       fetch("/api/applications?opportunities=true")
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : []))
         .catch(() => [])
-        .then((updated: string[]) => {
-          setOpportunities(updated);
+        .then((updated: unknown) => {
+          setOpportunities(Array.isArray(updated) ? (updated as string[]) : []);
           setSelectedOpportunity(trimmed);
           setRenamingOpportunity(false);
         });
