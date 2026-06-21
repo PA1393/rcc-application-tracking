@@ -15,7 +15,7 @@ vi.mock("@/lib/email", () => ({
 
 // These imports come after vi.mock() so they receive the fake versions.
 import { sendEmail } from "@/lib/email";
-import { POST } from "@/app/api/email/route";
+import { POST, __resetRateLimitForTests } from "@/app/api/email/route";
 
 const TEST_EMAIL = "test-email-1@test.com";
 
@@ -39,6 +39,7 @@ function makeRequest(body: Record<string, unknown>): Request {
 beforeEach(async () => {
   vi.mocked(sendEmail).mockClear();
   vi.mocked(sendEmail).mockResolvedValue({ messageId: "mock-id-123" } as any); // reset to default resolved value in case any test modified it
+  __resetRateLimitForTests();
 
   const applicant = await prisma.applicant.create({
     data: { email: TEST_EMAIL, name: "Email Test User" },
@@ -150,5 +151,82 @@ describe("POST /api/email", () => {
     // .mock.calls[0][0] = the first argument passed in the first call to sendEmail.
     const callArgs = vi.mocked(sendEmail).mock.calls[0][0];
     expect(callArgs.to).toBe("preferred@test.com");
+  });
+
+  // ── Validation ──────────────────────────────────────────────────────────
+  it("returns 400 when applicationId is missing", async () => {
+    const res = await POST(makeRequest({ subject: "S", body: "B" }));
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when subject is empty", async () => {
+    const res = await POST(makeRequest({ applicationId, subject: "   ", body: "B" }));
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when body is empty", async () => {
+    const res = await POST(makeRequest({ applicationId, subject: "S", body: "" }));
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when override 'to' is malformed", async () => {
+    const res = await POST(makeRequest({ applicationId, subject: "S", body: "B", to: "not-an-email" }));
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  // ── Sanitization ────────────────────────────────────────────────────────
+  it("strips CRLF from subject before passing to sendEmail (header injection defense)", async () => {
+    await POST(makeRequest({
+      applicationId,
+      subject: "Hello\r\nBcc: attacker@evil.com",
+      body: "Body content",
+    }));
+
+    const callArgs = vi.mocked(sendEmail).mock.calls[0][0];
+    // The CRLF is what would turn "Bcc:" into a separate header — once stripped,
+    // the literal substring becomes harmless text within the subject line.
+    expect(callArgs.subject).not.toMatch(/[\r\n]/);
+  });
+
+  it("HTML-escapes body content (XSS defense in rendered HTML email)", async () => {
+    await POST(makeRequest({
+      applicationId,
+      subject: "S",
+      body: "<script>alert(1)</script> & \"quote\"",
+    }));
+
+    const callArgs = vi.mocked(sendEmail).mock.calls[0][0];
+    expect(callArgs.html).not.toContain("<script>");
+    expect(callArgs.html).toContain("&lt;script&gt;");
+    expect(callArgs.html).toContain("&amp;");
+    // Plain-text variant keeps the raw text — only the HTML part is escaped.
+    expect(callArgs.text).toContain("<script>");
+  });
+
+  // ── Rate limiting ───────────────────────────────────────────────────────
+  it("returns 429 after exceeding the per-user send limit", async () => {
+    // RATE_MAX is 10 in the route; the 11th call should be throttled.
+    for (let i = 0; i < 10; i++) {
+      // Use a non-existent applicationId so each call returns 404 quickly without
+      // hitting the duplicate-send guard. The rate limiter increments before lookup,
+      // so 404s still count toward the limit — which is exactly the abuse case.
+      await POST(makeRequest({
+        applicationId: "00000000-0000-0000-0000-000000000000",
+        subject: "S",
+        body: "B",
+      }));
+    }
+    const res = await POST(makeRequest({
+      applicationId: "00000000-0000-0000-0000-000000000000",
+      subject: "S",
+      body: "B",
+    }));
+    expect(res.status).toBe(429);
+    const data = await res.json();
+    expect(data.error).toMatch(/too many/i);
   });
 });
