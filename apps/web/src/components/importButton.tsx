@@ -207,45 +207,45 @@ export default function ImportButton({
       <button
         ref={triggerRef}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 transition-all"
+        className="flex items-center transition-all"
         style={{
+          gap: 8,
+          height: 40,
+          padding: "0 16px",
+          borderRadius: 10,
+          background: "rgba(167,139,250,0.16)",
+          border: "1px solid #a78bfa",
+          color: "#a78bfa",
           fontSize: 13,
-          fontWeight: 500,
-          padding: "7px 14px",
-          borderRadius: 7,
-          background: open ? "#6B5FCC" : "#1C1930",
-          border: `0.5px solid ${open ? "#6B5FCC" : "rgba(139,130,190,0.12)"}`,
-          color: open ? "#EAE8F2" : "#A09BB5",
+          fontWeight: 700,
           cursor: "pointer",
         }}
-        onMouseEnter={(e) => {
-          if (!open) {
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "#6B5FCC";
-            (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2";
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!open) {
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(139,130,190,0.12)";
-            (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5";
-          }
-        }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.filter = "brightness(1.18)"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.filter = "none"; }}
       >
-        {/* Upload icon */}
-        <svg width="13" height="13" viewBox="0 0 12 12" fill="none" style={{ opacity: 0.8 }}>
-          <path d="M6 8V2M6 2L3.5 4.5M6 2L8.5 4.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-          <path d="M1.5 9.5V10.5H10.5V9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
-        Import
+        <span>Import</span>
         <svg
-          width="10" height="10" viewBox="0 0 10 10" fill="none"
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden
           style={{
-            opacity: 0.5,
+            opacity: 0.7,
             transition: "transform 0.18s ease",
             transform: open ? "rotate(180deg)" : "rotate(0deg)",
           }}
         >
-          <path d="M2.5 3.5L5 6.5L7.5 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
 

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Plus_Jakarta_Sans } from "next/font/google";
 
 import "@/index.css";
 import Header from "@/components/header";
@@ -16,6 +16,12 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const jakarta = Plus_Jakarta_Sans({
+  variable: "--font-jakarta",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+});
+
 export const metadata: Metadata = {
   title: "application-tracking-system",
   description: "application-tracking-system",
@@ -28,7 +34,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${jakarta.variable} antialiased`}>
         <Providers>
           <div className="grid grid-rows-[auto_1fr] h-svh">
             
