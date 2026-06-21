@@ -7,6 +7,7 @@ import ImportButton, {
 } from "@/components/importButton";
 import { getEmailTemplate } from "@/lib/emailTemplates";
 import ManageAccessModal from "@/components/ManageAccessModal";
+import { handleAuthFailure } from "@/lib/utils";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -240,6 +241,7 @@ function EmailDraftModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ applicationId: app.id, subject, body, to }),
       });
+      if (handleAuthFailure(res)) return;
       const data = await res.json();
       if (res.ok) {
         onSent(true);
@@ -470,9 +472,13 @@ function ApplicantModal({
 
   useEffect(() => {
     fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => {
+        if (handleAuthFailure(r)) return null;
+        return r.ok ? r.json() : [];
+      })
       .catch(() => [])
       .then((data: unknown) => {
+        if (data === null) return;
         setAllApps(Array.isArray(data) ? (data as Application[]) : []);
       });
   }, [initialApp.applicant_id]);
@@ -517,8 +523,9 @@ function ApplicantModal({
       body: JSON.stringify({ id: activeApp.id, [activeField]: noteDrafts[activeField] }),
     });
     setSavingNotes(false);
+    if (handleAuthFailure(res)) return;
     if (!res.ok) {
-      window.alert("Failed to save notes. Please sign in again and retry.");
+      window.alert("Failed to save notes. Please try again.");
     }
   }
 
@@ -534,10 +541,16 @@ function ApplicantModal({
       body: JSON.stringify({ id: activeApp.id, status: pendingStatus }),
     });
 
+    if (handleAuthFailure(res)) {
+      setChangingStatus(false);
+      setPendingStatus(null);
+      return;
+    }
+
     if (!res.ok) {
       setChangingStatus(false);
       setPendingStatus(null);
-      window.alert("Failed to update status. Please sign in again and retry.");
+      window.alert("Failed to update status. Please try again.");
       return;
     }
 
@@ -568,8 +581,9 @@ function ApplicantModal({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: activeApp.id, status: previousEmailStatus }),
     });
+    if (handleAuthFailure(res)) return;
     if (!res.ok) {
-      window.alert("Failed to revert status. Please sign in again and retry.");
+      window.alert("Failed to revert status. Please try again.");
       return;
     }
     const reverted = previousEmailStatus;
@@ -597,9 +611,13 @@ function ApplicantModal({
             setEmailIsManual(false);
             onRefreshBoard();
             fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
-              .then((r) => (r.ok ? r.json() : []))
+              .then((r) => {
+                if (handleAuthFailure(r)) return null;
+                return r.ok ? r.json() : [];
+              })
               .catch(() => [])
               .then((data: unknown) => {
+                if (data === null) return;
                 setAllApps(Array.isArray(data) ? (data as Application[]) : []);
               });
           }}
@@ -610,9 +628,13 @@ function ApplicantModal({
             if (wasSent) setToastVisible(true);
             onRefreshBoard();
             fetch(`/api/applications?applicantId=${initialApp.applicant_id}`)
-              .then((r) => (r.ok ? r.json() : []))
+              .then((r) => {
+                if (handleAuthFailure(r)) return null;
+                return r.ok ? r.json() : [];
+              })
               .catch(() => [])
               .then((data: unknown) => {
+                if (data === null) return;
                 setAllApps(Array.isArray(data) ? (data as Application[]) : []);
               });
           }}
@@ -1290,9 +1312,13 @@ export default function AdminPage() {
 
   const fetchOpportunities = useCallback((autoSelect = false) => {
     fetch("/api/applications?opportunities=true")
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => {
+        if (handleAuthFailure(r)) return null;
+        return r.ok ? r.json() : [];
+      })
       .catch(() => [])
       .then((data: unknown) => {
+        if (data === null) return;
         const list = Array.isArray(data) ? (data as string[]) : [];
         setOpportunities(list);
         if (autoSelect && list.length > 0) setSelectedOpportunity(list[0]);
@@ -1307,9 +1333,13 @@ export default function AdminPage() {
     if (!selectedOpportunity) return;
     setLoadingApps(true);
     fetch(`/api/applications?opportunity=${encodeURIComponent(selectedOpportunity)}`)
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => {
+        if (handleAuthFailure(r)) return null;
+        return r.ok ? r.json() : [];
+      })
       .catch(() => [])
       .then((data: unknown) => {
+        if (data === null) return;
         setApplications(Array.isArray(data) ? (data as Application[]) : []);
         setLoadingApps(false);
       });
@@ -1385,15 +1415,20 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ oldName: selectedOpportunity, newName: trimmed }),
       });
+      if (handleAuthFailure(res)) return;
       const data = await res.json();
       if (!res.ok) {
         setRenameError(data.error ?? "Failed to rename.");
         return;
       }
       fetch("/api/applications?opportunities=true")
-        .then((r) => (r.ok ? r.json() : []))
+        .then((r) => {
+          if (handleAuthFailure(r)) return null;
+          return r.ok ? r.json() : [];
+        })
         .catch(() => [])
         .then((updated: unknown) => {
+          if (updated === null) return;
           setOpportunities(Array.isArray(updated) ? (updated as string[]) : []);
           setSelectedOpportunity(trimmed);
           setRenamingOpportunity(false);

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Papa from "papaparse";
+import { handleAuthFailure } from "@/lib/utils";
 
 const ADD_NEW = "__add_new__";
 
@@ -31,7 +32,10 @@ export function useImportOpportunity() {
 
   useEffect(() => {
     fetch("/api/applications?opportunities=true")
-      .then((r) => r.json())
+      .then((r) => {
+        if (handleAuthFailure(r)) return null;
+        return r.ok ? r.json() : null;
+      })
       .then((data) => { if (Array.isArray(data)) setOpportunities(data); })
       .catch(() => {});
   }, []);
@@ -163,6 +167,7 @@ export default function ImportButton({
 
     try {
       const res = await fetch("/api/import", { method: "POST", body: formData });
+      if (handleAuthFailure(res)) return;
       const data = await res.json();
 
       if (res.ok) {

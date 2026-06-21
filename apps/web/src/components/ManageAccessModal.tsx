@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { handleAuthFailure } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -88,8 +89,12 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
 
   useEffect(() => {
     fetch("/api/users")
-      .then((r) => r.json())
+      .then((r) => {
+        if (handleAuthFailure(r)) return null;
+        return r.json();
+      })
       .then((data) => {
+        if (data === null) return;
         if (Array.isArray(data)) setUsers(data);
         else setFetchError("Failed to load users.");
       })
@@ -107,6 +112,7 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: addEmail, name: addName || undefined }),
       });
+      if (handleAuthFailure(res)) return;
       const data = await res.json();
       if (!res.ok) {
         setAddError(data.error ?? "Failed to add user.");
@@ -131,6 +137,7 @@ export default function ManageAccessModal({ onClose }: { onClose: () => void }) 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
+      if (handleAuthFailure(res)) return;
       if (!res.ok) {
         const data = await res.json();
         setRowError(data.error ?? "Failed to remove user.");

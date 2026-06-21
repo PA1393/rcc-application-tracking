@@ -94,6 +94,9 @@ function LoginFormInner() {
       case "AccessDenied":
         setError("This Google account does not have access to RCC ATS. Contact an administrator.");
         break;
+      case "SessionExpired":
+        setError("Your session has expired. Please sign in again.");
+        break;
       default:
         setError("Unable to sign in. Please try again.");
     }
