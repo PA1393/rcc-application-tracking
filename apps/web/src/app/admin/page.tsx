@@ -1442,6 +1442,8 @@ export default function AdminPage() {
   const [renameError, setRenameError] = useState<string | null>(null);
   const [renameLoading, setRenameLoading] = useState(false);
   const [showAccessModal, setShowAccessModal] = useState(false);
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+  const [bulkToastMessage, setBulkToastMessage] = useState<string | null>(null);
 
   const { data: session } = useSession();
   const sessionName = session?.user?.name ?? "User";
@@ -1573,6 +1575,96 @@ export default function AdminPage() {
       prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
     );
   }, []);
+
+  const handleBulkStatus = useCallback(
+    async (status: "Interviewing" | "Rejected") => {
+      const ids = [...selectedIds];
+      if (ids.length === 0) return;
+
+      // Snapshot current statuses for potential revert
+      const snapshot = new Map(
+        applications
+          .filter((a) => selectedIds.has(a.id))
+          .map((a) => [a.id, a.status])
+      );
+
+      // Optimistic update
+      setApplications((prev) =>
+        prev.map((a) => (selectedIds.has(a.id) ? { ...a, status } : a))
+      );
+
+      setIsBulkUpdating(true);
+      try {
+        const res = await fetch("/api/applications/bulk-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, status }),
+        });
+
+        if (handleAuthFailure(res)) return;
+
+        if (!res.ok) {
+          // Revert all
+          setApplications((prev) =>
+            prev.map((a) => {
+              const orig = snapshot.get(a.id);
+              return orig !== undefined ? { ...a, status: orig } : a;
+            })
+          );
+          setBulkToastMessage("Bulk update failed. Please try again.");
+          setTimeout(() => setBulkToastMessage(null), 3000);
+          return;
+        }
+
+        const data = (await res.json()) as { results: Array<{ id: string; ok: boolean; error?: string }> };
+        const failed = data.results.filter((r) => !r.ok);
+        const succeeded = data.results.filter((r) => r.ok);
+
+        // Revert failed rows
+        if (failed.length > 0) {
+          setApplications((prev) =>
+            prev.map((a) => {
+              const failedEntry = failed.find((f) => f.id === a.id);
+              if (!failedEntry) return a;
+              const orig = snapshot.get(a.id);
+              return orig !== undefined ? { ...a, status: orig } : a;
+            })
+          );
+          // Keep failed ids selected; remove succeeded ids
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            succeeded.forEach((r) => next.delete(r.id));
+            return next;
+          });
+        } else {
+          // All succeeded — clear selection
+          setSelectedIds(new Set());
+        }
+
+        const movedCount = succeeded.length;
+        const failedCount = failed.length;
+        const msg =
+          failedCount === 0
+            ? `${movedCount} moved to ${status}`
+            : `${movedCount} moved, ${failedCount} failed`;
+        setBulkToastMessage(msg);
+        setTimeout(() => setBulkToastMessage(null), 3000);
+      } catch {
+        // Network error — revert all
+        setApplications((prev) =>
+          prev.map((a) => {
+            const orig = snapshot.get(a.id);
+            return orig !== undefined ? { ...a, status: orig } : a;
+          })
+        );
+        setBulkToastMessage("Bulk update failed. Please try again.");
+        setTimeout(() => setBulkToastMessage(null), 3000);
+      } finally {
+        setIsBulkUpdating(false);
+      }
+    },
+    [selectedIds, applications]
+  );
 
   async function handleRenameSubmit() {
     const trimmed = renameValue.trim();
@@ -1987,6 +2079,60 @@ export default function AdminPage() {
           >
             Clear selection
           </button>
+          <button
+            onClick={() => handleBulkStatus("Interviewing")}
+            disabled={isBulkUpdating}
+            style={{
+              fontSize: 12.5,
+              fontWeight: 500,
+              color: isBulkUpdating ? "#6b6a78" : "#9a98ab",
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 7,
+              padding: "3px 10px",
+              cursor: isBulkUpdating ? "not-allowed" : "pointer",
+              opacity: isBulkUpdating ? 0.5 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!isBulkUpdating) {
+                (e.currentTarget as HTMLButtonElement).style.color = "#c4b5fd";
+                (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(167,139,250,0.35)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = isBulkUpdating ? "#6b6a78" : "#9a98ab";
+              (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.10)";
+            }}
+          >
+            Move to Interviewing
+          </button>
+          <button
+            onClick={() => handleBulkStatus("Rejected")}
+            disabled={isBulkUpdating}
+            style={{
+              fontSize: 12.5,
+              fontWeight: 500,
+              color: isBulkUpdating ? "#6b6a78" : "#9a98ab",
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 7,
+              padding: "3px 10px",
+              cursor: isBulkUpdating ? "not-allowed" : "pointer",
+              opacity: isBulkUpdating ? 0.5 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!isBulkUpdating) {
+                (e.currentTarget as HTMLButtonElement).style.color = "#c4b5fd";
+                (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(167,139,250,0.35)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = isBulkUpdating ? "#6b6a78" : "#9a98ab";
+              (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.10)";
+            }}
+          >
+            Move to Rejected
+          </button>
         </div>
       )}
 
@@ -2025,6 +2171,21 @@ export default function AdminPage() {
       {/* Manage Access modal */}
       {showAccessModal && (
         <ManageAccessModal onClose={() => setShowAccessModal(false)} />
+      )}
+
+      {/* Bulk action toast */}
+      {bulkToastMessage && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] text-sm font-medium px-5 py-2.5 shadow-lg"
+          style={{
+            background: "rgba(167,139,250,0.12)",
+            color: "#c4b5fd",
+            borderRadius: 8,
+            border: "0.5px solid rgba(167,139,250,0.25)",
+          }}
+        >
+          {bulkToastMessage}
+        </div>
       )}
     </main>
   );
