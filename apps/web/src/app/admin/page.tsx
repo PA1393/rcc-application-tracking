@@ -1141,9 +1141,15 @@ function ApplicantModal({
 function ApplicantCard({
   app,
   onOpen,
+  isSelected,
+  anySelected,
+  onToggleSelect,
 }: {
   app: Application;
   onOpen: (app: Application) => void;
+  isSelected: boolean;
+  anySelected: boolean;
+  onToggleSelect: (id: string) => void;
 }) {
   const emailSent = !!(EMAIL_STATUSES as readonly string[]).includes(app.status) && !!statusToSentAt(app.status, app);
   const showSentBadge = emailSent;
@@ -1157,18 +1163,51 @@ function ApplicantCard({
     onOpen(app);
   }
 
+  function handleCheckboxClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    onToggleSelect(app.id);
+  }
+
+  const cardBorder = isSelected
+    ? "2px solid #a78bfa"
+    : "1px solid rgba(255,255,255,0.06)";
+  const cardOpacity = anySelected && !isSelected ? 0.45 : 1;
+
   return (
     <div
-      className="rcc-card relative cursor-pointer select-none"
+      className="rcc-card relative cursor-pointer select-none group"
       style={{
         padding: "13px 15px",
         borderRadius: 12,
-        background: "#15141e",
-        border: "1px solid rgba(255,255,255,0.06)",
-        transition: "transform 0.16s ease, border-color 0.16s, background 0.16s, box-shadow 0.16s",
+        background: isSelected ? "rgba(167,139,250,0.08)" : "#15141e",
+        border: cardBorder,
+        transition: "transform 0.16s ease, border-color 0.16s, background 0.16s, box-shadow 0.16s, opacity 0.16s",
+        opacity: cardOpacity,
       }}
       onClick={handleCardClick}
     >
+      {/* Selection checkbox — top-left corner */}
+      <div
+        className={`absolute top-2 left-2 z-10 ${anySelected ? "flex" : "hidden group-hover:flex"}`}
+        onClick={handleCheckboxClick}
+        style={{ alignItems: "center", justifyContent: "center" }}
+      >
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => { /* controlled via onClick */ }}
+          onClick={handleCheckboxClick}
+          aria-label={`Select ${app.applicant.name}`}
+          style={{
+            width: 15,
+            height: 15,
+            cursor: "pointer",
+            accentColor: "#a78bfa",
+            borderRadius: 4,
+          }}
+        />
+      </div>
+
       <div className="flex items-start gap-3">
         {/* Avatar */}
         <div
@@ -1243,12 +1282,29 @@ function Column({
   status,
   apps,
   onOpen,
+  selectedIds,
+  onToggleSelect,
+  onToggleAll,
 }: {
   status: Status;
   apps: Application[];
   onOpen: (app: Application) => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onToggleAll: (ids: string[]) => void;
 }) {
   const barColor = columnBarColor(status);
+  const columnIds = apps.map((a) => a.id);
+  const selectedInColumn = columnIds.filter((id) => selectedIds.has(id));
+  const allSelected = columnIds.length > 0 && selectedInColumn.length === columnIds.length;
+  const someSelected = selectedInColumn.length > 0 && !allSelected;
+  const anySelected = selectedIds.size > 0;
+
+  function handleColumnCheckbox(e: React.MouseEvent) {
+    e.stopPropagation();
+    onToggleAll(columnIds);
+  }
+
   return (
     <div
       className="flex flex-col min-w-0 overflow-hidden h-full"
@@ -1257,6 +1313,28 @@ function Column({
       {/* Column header */}
       <div className="flex items-center justify-between shrink-0" style={{ padding: "16px 18px 12px 18px" }}>
         <div className="flex items-center" style={{ gap: 10 }}>
+          {/* Column select-all checkbox */}
+          {apps.length > 0 && (
+            <div
+              className={`${anySelected ? "flex" : "hidden group-hover:flex"} items-center`}
+              style={{ marginRight: 4 }}
+            >
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                onChange={() => { /* controlled via onClick */ }}
+                onClick={handleColumnCheckbox}
+                aria-label={`Select all in ${status}`}
+                style={{
+                  width: 14,
+                  height: 14,
+                  cursor: "pointer",
+                  accentColor: "#a78bfa",
+                }}
+              />
+            </div>
+          )}
           <span
             style={{
               width: 3,
@@ -1302,7 +1380,14 @@ function Column({
         style={{ padding: "2px 14px 18px 18px", gap: 10 }}
       >
         {apps.map((app) => (
-          <ApplicantCard key={app.id} app={app} onOpen={onOpen} />
+          <ApplicantCard
+            key={app.id}
+            app={app}
+            onOpen={onOpen}
+            isSelected={selectedIds.has(app.id)}
+            anySelected={anySelected}
+            onToggleSelect={onToggleSelect}
+          />
         ))}
         {apps.length === 0 && (
           <div
@@ -1351,6 +1436,7 @@ export default function AdminPage() {
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [selectedTeam, setSelectedTeam] = useState("All Teams");
   const [selectedPosition, setSelectedPosition] = useState("All Positions");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [renamingOpportunity, setRenamingOpportunity] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -1401,6 +1487,42 @@ export default function AdminPage() {
   useEffect(() => {
     fetchApps();
   }, [fetchApps]);
+
+  // ── Bulk selection helpers ────────────────────────────────────────────────
+  // Clear selection whenever the user switches to a different opportunity.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [selectedOpportunity]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  // Selects all ids if none/some are selected; deselects all if all are selected.
+  const toggleSelectAll = useCallback((ids: string[]) => {
+    setSelectedIds((prev) => {
+      const allIn = ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allIn) {
+        ids.forEach((id) => next.delete(id));
+      } else {
+        ids.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }, []);
 
   // E-Board apps have track="Ambassador" but no _teamPreference1 key in rawData.
   // Real Ambassador apps always have _teamPreference1 injected by normalizeAmbassadorData,
@@ -1834,6 +1956,40 @@ export default function AdminPage() {
         />
       </div>
 
+      {/* ── Selection Toolbar (shown when 1+ cards are selected) ────────────── */}
+      {selectedIds.size > 0 && (
+        <div
+          className="shrink-0 flex items-center"
+          style={{
+            gap: 12,
+            padding: "8px 26px",
+            background: "rgba(167,139,250,0.10)",
+            borderBottom: "1px solid rgba(167,139,250,0.20)",
+          }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#c4b5fd" }}>
+            {selectedIds.size} selected
+          </span>
+          <button
+            onClick={clearSelection}
+            style={{
+              fontSize: 12.5,
+              fontWeight: 500,
+              color: "#9a98ab",
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 7,
+              padding: "3px 10px",
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#c4b5fd"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(167,139,250,0.35)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#9a98ab"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.10)"; }}
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {/* ── ZONE 3: Board Area ─────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden" style={{ padding: "0 14px 0 0" }}>
         {loadingApps ? (
@@ -1846,6 +2002,9 @@ export default function AdminPage() {
                 status={status}
                 apps={byStatus(status)}
                 onOpen={setSelectedApp}
+                selectedIds={selectedIds}
+                onToggleSelect={toggleSelect}
+                onToggleAll={toggleSelectAll}
               />
             ))}
           </div>
