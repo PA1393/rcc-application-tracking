@@ -49,20 +49,20 @@ type Status = (typeof STATUSES)[number];
 
 function statusColor(status: string) {
   switch (status) {
-    case "To Review":    return { background: "rgba(107,158,247,0.12)", color: "#6B9EF7" };
-    case "Interviewing": return { background: "rgba(240,176,64,0.12)",  color: "#F0B040" };
-    case "Accepted":     return { background: "rgba(74,222,128,0.12)",  color: "#4ADE80" };
-    case "Rejected":     return { background: "rgba(240,96,96,0.12)",   color: "#F06060" };
-    default:             return { background: "rgba(160,155,181,0.12)", color: "#A09BB5" };
+    case "To Review":    return { background: "rgba(79,140,255,0.14)",   color: "#4f8cff" };
+    case "Interviewing": return { background: "rgba(167,139,250,0.16)",  color: "#a78bfa" };
+    case "Accepted":     return { background: "rgba(52,211,153,0.14)",   color: "#34d399" };
+    case "Rejected":     return { background: "rgba(244,63,94,0.14)",    color: "#f43f5e" };
+    default:             return { background: "rgba(155,153,171,0.14)",  color: "#9a98ab" };
   }
 }
 
 function columnBarColor(status: Status): string {
   switch (status) {
-    case "To Review":    return "#6B9EF7";
-    case "Interviewing": return "#F0B040";
-    case "Accepted":     return "#4ADE80";
-    case "Rejected":     return "#F06060";
+    case "To Review":    return "#4f8cff";
+    case "Interviewing": return "#a78bfa";
+    case "Accepted":     return "#34d399";
+    case "Rejected":     return "#f43f5e";
   }
 }
 
@@ -1146,12 +1146,12 @@ function ApplicantCard({
   onOpen: (app: Application) => void;
 }) {
   const emailSent = !!(EMAIL_STATUSES as readonly string[]).includes(app.status) && !!statusToSentAt(app.status, app);
-  const showEmail = (EMAIL_STATUSES as readonly string[]).includes(app.status);
+  const showSentBadge = emailSent;
+  const showPrefers = app.track === "Ambassador" && !!app.rawData?._teamPreference1;
 
   function handleCardClick(e: React.MouseEvent<HTMLDivElement>) {
     const el = e.currentTarget;
     el.classList.remove("rcc-card-press");
-    // Force reflow so removing + re-adding restarts animation
     void el.offsetWidth;
     el.classList.add("rcc-card-press");
     onOpen(app);
@@ -1159,59 +1159,80 @@ function ApplicantCard({
 
   return (
     <div
-      className="rounded-[8px] cursor-pointer select-none flex items-center gap-3"
+      className="rcc-card relative cursor-pointer select-none"
       style={{
-        background: "#1C1930",
-        border: "0.5px solid rgba(139,130,190,0.12)",
-        padding: "10px 12px",
-        transition: "border-color 0.15s",
+        padding: "13px 15px",
+        borderRadius: 12,
+        background: "#15141e",
+        border: "1px solid rgba(255,255,255,0.06)",
+        transition: "transform 0.16s ease, border-color 0.16s, background 0.16s, box-shadow 0.16s",
       }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "#6B5FCC"; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(139,130,190,0.12)"; }}
       onClick={handleCardClick}
     >
-      {/* LEFT: initials avatar */}
-      <div
-        className="shrink-0 flex items-center justify-center rounded-full"
-        style={{ width: 32, height: 32, background: "#242040" }}
-      >
-        <span style={{ fontSize: 11, fontWeight: 500, color: "#8B7FEE" }}>
-          {getInitials(app.applicant.name)}
-        </span>
-      </div>
-
-      {/* MIDDLE: name + role + optional team pref */}
-      <div className="min-w-0 flex-1">
-        <p className="truncate" style={{ fontSize: 12, fontWeight: 500, color: "#EAE8F2", lineHeight: "1.3" }}>
-          {app.applicant.name}
-        </p>
-        <p className="truncate" style={{ fontSize: 10, color: "#6A6580", lineHeight: "1.3" }}>
-          {app.role}
-        </p>
-        {app.track === "Ambassador" && app.rawData?._teamPreference1 && (
-          <p className="truncate" style={{ fontSize: 9, color: "#8B7FEE", opacity: 0.7, lineHeight: "1.3" }}>
-            Prefers: {app.rawData._teamPreference1}
-          </p>
-        )}
-      </div>
-
-      {/* RIGHT: email status badge */}
-      {showEmail && (
-        <span
-          className="shrink-0"
+      <div className="flex items-start gap-3">
+        {/* Avatar */}
+        <div
+          className="shrink-0 flex items-center justify-center rounded-full"
           style={{
-            fontSize: 9,
-            padding: "2px 6px",
-            borderRadius: 4,
-            lineHeight: "1.4",
-            background: emailSent ? "rgba(74,222,128,0.12)" : "rgba(106,101,128,0.2)",
-            color: emailSent ? "#4ADE80" : "#6A6580",
-            whiteSpace: "nowrap",
+            width: 38,
+            height: 38,
+            background: "rgba(167,139,250,0.16)",
+            border: "1px solid rgba(167,139,250,0.30)",
+            color: "#c4b5fd",
+            fontSize: 12.5,
+            fontWeight: 700,
+            letterSpacing: "0.3px",
           }}
         >
-          ✉ {emailSent ? "Sent" : "Not sent"}
-        </span>
-      )}
+          {getInitials(app.applicant.name)}
+        </div>
+
+        {/* Identity */}
+        <div className="flex-1 min-w-0 flex flex-col" style={{ gap: 2 }}>
+          <div
+            className="truncate"
+            style={{ fontSize: 14, fontWeight: 600, color: "#ECEAF3", letterSpacing: "-0.1px" }}
+          >
+            {app.applicant.name}
+          </div>
+          <div
+            className="truncate"
+            style={{ fontSize: 12.5, color: "#9a98ab", fontWeight: 500 }}
+          >
+            {app.role}
+          </div>
+          {showPrefers && (
+            <div
+              className="truncate"
+              style={{ fontSize: 11.5, color: "#6c6a7d", fontWeight: 500, marginTop: 1 }}
+            >
+              Prefers: {app.rawData?._teamPreference1}
+            </div>
+          )}
+        </div>
+
+        {/* Sent badge */}
+        {showSentBadge && (
+          <div
+            className="shrink-0 flex items-center"
+            style={{
+              gap: 4,
+              padding: "4px 8px",
+              borderRadius: 7,
+              background: "rgba(52,211,153,0.12)",
+              border: "1px solid rgba(52,211,153,0.22)",
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <rect x="2.5" y="5" width="19" height="14" rx="2.5" stroke="#34d399" strokeWidth="2" />
+              <path d="M3 7l9 6 9-6" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#34d399", letterSpacing: "0.2px" }}>
+              Sent
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1229,24 +1250,46 @@ function Column({
 }) {
   const barColor = columnBarColor(status);
   return (
-    <div className="flex flex-col min-w-0 overflow-hidden">
+    <div
+      className="flex flex-col min-w-0 overflow-hidden h-full"
+      style={{ borderRight: "1px solid rgba(255,255,255,0.05)" }}
+    >
       {/* Column header */}
-      <div className="flex items-center gap-2 mb-3 shrink-0">
-        {/* Colored bar */}
-        <div style={{ width: 3, height: 14, borderRadius: 2, background: barColor, flexShrink: 0 }} />
-        <h3
-          className="flex-1 uppercase"
-          style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.6px", color: "#A09BB5" }}
-        >
-          {status}
-        </h3>
+      <div className="flex items-center justify-between shrink-0" style={{ padding: "16px 18px 12px 18px" }}>
+        <div className="flex items-center" style={{ gap: 10 }}>
+          <span
+            style={{
+              width: 3,
+              height: 15,
+              borderRadius: 3,
+              background: barColor,
+              boxShadow: `0 0 10px ${barColor}66`,
+            }}
+          />
+          <span
+            className="uppercase"
+            style={{
+              fontSize: 11.5,
+              fontWeight: 700,
+              letterSpacing: "1.2px",
+              color: "#8b8a99",
+            }}
+          >
+            {status}
+          </span>
+        </div>
         <span
+          className="inline-flex items-center justify-center"
           style={{
-            fontSize: 10,
-            background: "#1C1930",
-            color: "#6A6580",
-            padding: "2px 8px",
-            borderRadius: 10,
+            minWidth: 22,
+            height: 22,
+            padding: "0 7px",
+            borderRadius: 7,
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.07)",
+            fontSize: 12,
+            fontWeight: 700,
+            color: "#bbb9c9",
           }}
         >
           {apps.length}
@@ -1254,17 +1297,25 @@ function Column({
       </div>
 
       {/* Card list */}
-      <div className="flex-1 overflow-y-auto space-y-2">
+      <div
+        className="flex-1 overflow-y-auto flex flex-col"
+        style={{ padding: "2px 14px 18px 18px", gap: 10 }}
+      >
         {apps.map((app) => (
           <ApplicantCard key={app.id} app={app} onOpen={onOpen} />
         ))}
         {apps.length === 0 && (
-          <p
-            className="text-center py-8 rounded-lg"
-            style={{ fontSize: 11, color: "#6A6580", border: "0.5px dashed rgba(139,130,190,0.15)" }}
+          <div
+            className="flex items-center justify-center"
+            style={{
+              marginTop: 8,
+              padding: "30px 16px",
+              borderRadius: 12,
+              border: "1.5px dashed rgba(255,255,255,0.08)",
+            }}
           >
-            No applicants
-          </p>
+            <span style={{ fontSize: 12.5, color: "#565465", fontWeight: 500 }}>No applicants</span>
+          </div>
         )}
       </div>
     </div>
@@ -1278,12 +1329,14 @@ const NOTES_MAX_WIDTH     = 520;
 
 // ── Pill style for command strip controls ─────────────────────────────────────
 const stripPillStyle: React.CSSProperties = {
-  background: "#1C1930",
-  border: "0.5px solid rgba(139,130,190,0.12)",
-  color: "#A09BB5",
-  borderRadius: "6px",
-  fontSize: "12px",
-  padding: "6px 10px",
+  background: "rgba(22,21,31,0.9)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  color: "#bbb9c9",
+  borderRadius: 10,
+  fontSize: 13.5,
+  fontWeight: 500,
+  height: 40,
+  padding: "0 14px",
   outline: "none",
 };
 
@@ -1465,79 +1518,116 @@ export default function AdminPage() {
   return (
     <main
       className="h-screen overflow-hidden flex flex-col"
-      style={{ background: "#0C0A14" }}
+      style={{
+        fontFamily: "var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif",
+        color: "#ECEAF3",
+        background:
+          "radial-gradient(900px 500px at 12% -8%, rgba(124,58,237,0.16), transparent 60%), " +
+          "radial-gradient(800px 500px at 88% -10%, rgba(219,39,119,0.10), transparent 55%), " +
+          "#08070d",
+      }}
     >
-      {/* ── ZONE 1: Header Bar (~48px) ─────────────────────────────────────── */}
+      {/* ── ZONE 1: Header ─────────────────────────────────────────────────── */}
       <header
-        className="flex items-center justify-between px-5 shrink-0"
+        className="flex items-center justify-between shrink-0"
         style={{
-          height: "48px",
-          background: "#141120",
-          borderBottom: "0.5px solid rgba(139,130,190,0.12)",
+          padding: "14px 26px",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          background: "rgba(10,9,15,0.55)",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
         }}
       >
-        {/* Left: logo + app name */}
-        <div className="flex items-center gap-2.5">
-          {/* Logo mark */}
+        <div className="flex items-center" style={{ gap: 13 }}>
           <div
-            className="w-7 h-7 rounded-[6px] flex items-center justify-center shrink-0"
-            style={{ background: "linear-gradient(135deg, #6B5FCC, #D4537E)" }}
+            className="flex items-center justify-center shrink-0"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              background: "linear-gradient(140deg, #7c3aed, #db2777)",
+              boxShadow: "0 6px 18px rgba(124,58,237,0.45), inset 0 1px 0 rgba(255,255,255,0.25)",
+              fontWeight: 800,
+              color: "#fff",
+              fontSize: 17,
+              letterSpacing: "-0.5px",
+            }}
           >
-            <span className="text-sm font-bold" style={{ color: "#EAE8F2" }}>R</span>
+            R
           </div>
-          {/* App identity */}
-          <div className="leading-none">
-            <p className="text-[15px] font-semibold leading-tight" style={{ color: "#EAE8F2" }}>RCC ATS</p>
-            <p className="text-[11px] leading-tight" style={{ color: "#6A6580" }}>Applicant tracking system</p>
+          <div className="flex flex-col" style={{ gap: 1, lineHeight: 1.1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#ECEAF3", letterSpacing: "-0.2px" }}>
+              RCC ATS
+            </div>
+            <div style={{ fontSize: 11.5, color: "#6c6a7d", fontWeight: 500, letterSpacing: "0.1px" }}>
+              Applicant tracking system
+            </div>
           </div>
         </div>
 
-        {/* Right: user identity + sign out */}
-        <div className="flex items-center gap-2">
-          <span className="text-[12px]" style={{ color: "#6A6580" }}>{sessionName}</span>
+        <div className="flex items-center" style={{ gap: 16 }}>
+          <span style={{ fontSize: 13.5, color: "#9a98ab", fontWeight: 500 }}>{sessionName}</span>
           {session?.user?.image ? (
             <img
               src={session.user.image}
               alt={sessionName}
               referrerPolicy="no-referrer"
-              className="w-[30px] h-[30px] rounded-full shrink-0 object-cover"
+              className="shrink-0 object-cover"
+              style={{ width: 30, height: 30, borderRadius: "50%" }}
             />
           ) : (
             <div
-              className="w-[30px] h-[30px] rounded-full flex items-center justify-center shrink-0"
-              style={{ background: "linear-gradient(135deg, #6B5FCC, #D4537E)" }}
+              className="shrink-0 flex items-center justify-center"
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: "50%",
+                background: "linear-gradient(140deg, #7c3aed, #db2777)",
+                color: "#fff",
+                fontSize: 12.5,
+                fontWeight: 700,
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25)",
+              }}
             >
-              <span className="text-[11px] font-semibold" style={{ color: "#EAE8F2" }}>{sessionInitials}</span>
+              {sessionInitials}
             </div>
           )}
           <button
             onClick={() => signOut({ callbackUrl: "/login" })}
-            className="text-[11px] transition-colors"
-            style={{ color: "#6A6580", background: "transparent", border: "none", cursor: "pointer", padding: "2px 0" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#6A6580"; }}
+            className="transition-colors"
+            style={{
+              fontSize: 13,
+              color: "#6c6a7d",
+              fontWeight: 500,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#c4b5fd"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#6c6a7d"; }}
           >
             Sign out
           </button>
         </div>
       </header>
 
-      {/* ── ZONE 2: Command Strip (~44px) — relative so banners can anchor to it */}
+      {/* ── ZONE 2: Command Strip ──────────────────────────────────────────── */}
       <div
-        className="flex items-center gap-2 px-5 shrink-0 relative"
+        className="flex items-center shrink-0 relative"
         style={{
-          height: "44px",
-          background: "#141120",
-          borderBottom: "0.5px solid rgba(139,130,190,0.12)",
+          gap: 12,
+          padding: "14px 26px",
+          borderBottom: "1px solid rgba(255,255,255,0.05)",
         }}
       >
-        {/* 1. Board opportunity dropdown / inline rename */}
+        {/* 1. Opportunity dropdown / inline rename */}
         {opportunities.length === 0 ? (
-          <span style={{ ...stripPillStyle, color: "#6A6580", cursor: "default" }}>
+          <span style={{ ...stripPillStyle, color: "#6c6a7d", cursor: "default", display: "inline-flex", alignItems: "center" }}>
             No opportunities
           </span>
         ) : renamingOpportunity ? (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center" style={{ gap: 6 }}>
             <input
               type="text"
               value={renameValue}
@@ -1547,124 +1637,193 @@ export default function AdminPage() {
                 if (e.key === "Enter") handleRenameSubmit();
                 if (e.key === "Escape") { setRenamingOpportunity(false); setRenameError(null); }
               }}
-              className="transition-colors"
-              style={{ ...stripPillStyle, width: 160 }}
+              style={{ ...stripPillStyle, width: 200, color: "#ECEAF3" }}
             />
             <button
               onClick={handleRenameSubmit}
               disabled={renameLoading}
               className="transition-colors disabled:opacity-50"
-              style={{ background: "#6B5FCC", color: "#EAE8F2", border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 12, cursor: "pointer" }}
+              style={{
+                background: "rgba(167,139,250,0.16)",
+                border: "1px solid #a78bfa",
+                color: "#c4b5fd",
+                borderRadius: 10,
+                padding: "0 14px",
+                height: 40,
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
             >
               {renameLoading ? "..." : "Save"}
             </button>
             <button
               onClick={() => { setRenamingOpportunity(false); setRenameError(null); }}
-              style={{ background: "transparent", border: "none", color: "#A09BB5", fontSize: 12, cursor: "pointer", padding: "5px 6px" }}
+              style={{
+                background: "rgba(22,21,31,0.9)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                color: "#9a98ab",
+                borderRadius: 10,
+                fontSize: 14,
+                cursor: "pointer",
+                height: 40,
+                width: 40,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
             >
               ✕
             </button>
             {renameError && (
               <span
                 className="absolute pointer-events-none"
-                style={{ top: "calc(100% + 2px)", left: 20, fontSize: 11, color: "#F06060", whiteSpace: "nowrap" }}
+                style={{ top: "100%", left: 26, fontSize: 11, color: "#f43f5e", whiteSpace: "nowrap" }}
               >
                 {renameError}
               </span>
             )}
           </div>
         ) : (
-          <div className="flex items-center gap-1">
-            <select
-              value={selectedOpportunity}
-              onChange={(e) => setSelectedOpportunity(e.target.value)}
-              className="appearance-none cursor-pointer transition-colors"
-              style={{ ...stripPillStyle, maxWidth: "160px" }}
-            >
-              {opportunities.map((o) => (
-                <option key={o} value={o}>{o}</option>
-              ))}
-            </select>
+          <div className="relative flex items-center" style={{ gap: 6 }}>
+            <div className="relative inline-flex items-center" style={{ gap: 10, ...stripPillStyle }}>
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: "#a78bfa",
+                  boxShadow: "0 0 10px #a78bfa",
+                  flexShrink: 0,
+                }}
+              />
+              <select
+                value={selectedOpportunity}
+                onChange={(e) => setSelectedOpportunity(e.target.value)}
+                className="appearance-none cursor-pointer bg-transparent"
+                style={{
+                  border: "none",
+                  outline: "none",
+                  color: "#ECEAF3",
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  paddingRight: 22,
+                  background: "transparent",
+                  maxWidth: 220,
+                }}
+              >
+                {opportunities.map((o) => (
+                  <option key={o} value={o} style={{ background: "#15141e", color: "#ECEAF3" }}>{o}</option>
+                ))}
+              </select>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ opacity: 0.5, position: "absolute", right: 12, pointerEvents: "none" }}>
+                <path d="M6 9l6 6 6-6" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
             {selectedOpportunity && (
               <button
                 onClick={() => { setRenameValue(selectedOpportunity); setRenamingOpportunity(true); setRenameError(null); }}
                 title="Rename opportunity"
-                style={{ background: "transparent", border: "none", color: "#6A6580", cursor: "pointer", padding: "4px", lineHeight: 1, display: "flex", alignItems: "center" }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#6A6580"; }}
+                className="flex items-center justify-center transition-colors"
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  background: "rgba(22,21,31,0.9)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  cursor: "pointer",
+                  color: "#9a98ab",
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#a78bfa"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
               >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M8.5 1.5L10.5 3.5L4 10H2V8L8.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
             )}
           </div>
         )}
 
-        {/* 2. Ambassador team filter (only when ambassador board) */}
+        {/* 2. Ambassador team filter */}
         {isAmbassadorBoard && (
           <select
             value={selectedTeam}
             onChange={(e) => setSelectedTeam(e.target.value)}
-            className="appearance-none cursor-pointer transition-colors"
-            style={stripPillStyle}
+            className="appearance-none cursor-pointer"
+            style={{ ...stripPillStyle, color: "#ECEAF3", paddingRight: 32 }}
           >
-            <option value="All Teams">All Teams</option>
+            <option value="All Teams" style={{ background: "#15141e" }}>All Teams</option>
             {AMBASSADOR_TEAMS.map((t) => (
-              <option key={t} value={t}>{t}</option>
+              <option key={t} value={t} style={{ background: "#15141e" }}>{t}</option>
             ))}
           </select>
         )}
 
-        {/* 2b. Position filter (only for non-Ambassador boards with multiple roles) */}
+        {/* 2b. Position filter */}
         {isPositionFilterable && availablePositions.length > 1 && (
           <select
             value={selectedPosition}
             onChange={(e) => setSelectedPosition(e.target.value)}
-            className="appearance-none cursor-pointer transition-colors"
-            style={stripPillStyle}
+            className="appearance-none cursor-pointer"
+            style={{ ...stripPillStyle, color: "#ECEAF3", paddingRight: 32, minWidth: 190 }}
           >
-            <option value="All Positions">All Positions</option>
+            <option value="All Positions" style={{ background: "#15141e" }}>All Positions</option>
             {availablePositions.map((p) => (
-              <option key={p} value={p}>{p}</option>
+              <option key={p} value={p} style={{ background: "#15141e" }}>{p}</option>
             ))}
           </select>
         )}
 
-        {/* 3. Divider */}
-        <div style={{ width: "1px", height: "20px", background: "rgba(139,130,190,0.12)", flexShrink: 0 }} />
+        {/* 3. Search */}
+        <div className="relative" style={{ flex: 1, maxWidth: 380 }}>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}
+          >
+            <circle cx="11" cy="11" r="7" stroke="#6c6a7d" strokeWidth="2" />
+            <path d="M21 21l-4.3-4.3" stroke="#6c6a7d" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or email..."
+            style={{
+              ...stripPillStyle,
+              width: "100%",
+              paddingLeft: 38,
+              color: search ? "#ECEAF3" : "#bbb9c9",
+              fontFamily: "inherit",
+            }}
+          />
+        </div>
 
-        {/* 4. Search box */}
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name or email..."
-          className="transition-colors"
-          style={{
-            ...stripPillStyle,
-            flex: "1",
-            maxWidth: "280px",
-            color: search ? "#EAE8F2" : "#6A6580",
-          }}
-        />
-
-        {/* 5. Spacer */}
+        {/* Spacer */}
         <div style={{ flex: 1 }} />
 
         {/* Manage Access */}
         <button
           onClick={() => setShowAccessModal(true)}
-          className="transition-colors"
+          className="flex items-center transition-colors"
           style={{
             ...stripPillStyle,
+            gap: 8,
+            color: "#bbb9c9",
             cursor: "pointer",
-            border: "0.5px solid rgba(139,130,190,0.12)",
           }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5"; }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.18)"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
         >
-          Manage Access
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="#9a98ab" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="9" cy="7" r="4" stroke="#9a98ab" strokeWidth="2" />
+            <path d="M22 11h-6M19 8v6" stroke="#9a98ab" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Manage Access</span>
         </button>
 
         {/* Import */}
@@ -1676,11 +1835,11 @@ export default function AdminPage() {
       </div>
 
       {/* ── ZONE 3: Board Area ─────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-hidden px-6 py-4">
+      <div className="flex-1 overflow-hidden" style={{ padding: "0 14px 0 0" }}>
         {loadingApps ? (
-          <p className="text-sm" style={{ color: "#6A6580" }}>Loading...</p>
+          <p className="text-sm" style={{ padding: "16px 26px", color: "#9a98ab" }}>Loading...</p>
         ) : (
-          <div className="grid grid-cols-4 gap-4 h-full">
+          <div className="grid grid-cols-4 h-full" style={{ minHeight: 0 }}>
             {STATUSES.map((status) => (
               <Column
                 key={status}
