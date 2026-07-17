@@ -110,6 +110,24 @@ const AMBASSADOR_TEAMS = [
   "Growth Analytics Team",
 ] as const;
 
+// ── Preference helpers ────────────────────────────────────────────────────────
+
+function getRankedPreferences(
+  rawData: Record<string, any> | null | undefined
+): Array<{ rank: 1 | 2 | 3; role: string }> {
+  if (!rawData) return [];
+  const result: Array<{ rank: 1 | 2 | 3; role: string }> = [];
+  const p1 = rawData._teamPreference1;
+  const p2 = rawData._teamPreference2;
+  const p3 = rawData._teamPreference3;
+  if (typeof p1 === "string" && p1.trim()) result.push({ rank: 1, role: p1.trim() });
+  if (typeof p2 === "string" && p2.trim()) result.push({ rank: 2, role: p2.trim() });
+  if (typeof p3 === "string" && p3.trim()) result.push({ rank: 3, role: p3.trim() });
+  return result;
+}
+
+const RANK_LABELS: Record<1 | 2 | 3, string> = { 1: "1st", 2: "2nd", 3: "3rd" };
+
 // ── Modal Q&A display helpers ─────────────────────────────────────────────────
 
 // Column prefix for the new Lead & Ambassador matrix form.
@@ -785,6 +803,34 @@ function ApplicantModal({
             </div>
           </div>
 
+          {/* Preference chip row — Ambassador matrix applications only */}
+          {activeApp.track === "Ambassador" && getRankedPreferences(activeApp.rawData).length > 0 && (
+            <div
+              className="flex items-center gap-2 px-6 shrink-0 flex-wrap"
+              style={{ paddingTop: 10, paddingBottom: 10, borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 500, color: "#6A6580", letterSpacing: "0.3px", whiteSpace: "nowrap" }}>
+                Preferences
+              </span>
+              {getRankedPreferences(activeApp.rawData).map((p) => (
+                <span
+                  key={p.rank}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: "#8B7FEE",
+                    background: "rgba(139,127,238,0.15)",
+                    borderRadius: 6,
+                    padding: "3px 8px",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {RANK_LABELS[p.rank]}: {p.role}
+                </span>
+              ))}
+            </div>
+          )}
+
           {/* Role / opportunity tabs */}
           <div
             className="flex gap-1 px-6 pt-3 pb-0 shrink-0"
@@ -1153,7 +1199,8 @@ function ApplicantCard({
 }) {
   const emailSent = !!(EMAIL_STATUSES as readonly string[]).includes(app.status) && !!statusToSentAt(app.status, app);
   const showSentBadge = emailSent;
-  const showPrefers = app.track === "Ambassador" && !!app.rawData?._teamPreference1;
+  const rankedPrefs = getRankedPreferences(app.rawData);
+  const showPrefers = app.track === "Ambassador" && rankedPrefs.length > 0;
 
   function handleCardClick(e: React.MouseEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -1245,7 +1292,7 @@ function ApplicantCard({
               className="truncate"
               style={{ fontSize: 11.5, color: "#6c6a7d", fontWeight: 500, marginTop: 1 }}
             >
-              Prefers: {app.rawData?._teamPreference1}
+              {`Prefers: ${rankedPrefs.map((p) => `${p.rank}) ${p.role}`).join(" · ")}`}
             </div>
           )}
         </div>
