@@ -1,0 +1,248 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// ── Mock auth() ────────────────────────────────────────────────────────────────
+vi.mock("@/lib/auth", () => ({
+  auth: vi.fn(),
+}));
+
+// ── Mock sendEmail so tests never open a real SMTP connection ─────────────────
+vi.mock("@/lib/email", () => ({
+  sendEmail: vi.fn().mockResolvedValue({ messageId: "bulk-mock-id" }),
+}));
+
+import { auth } from "@/lib/auth";
+import { sendEmail } from "@/lib/email";
+import { POST } from "@/app/api/applications/bulk-email/route";
+import { __resetRateLimitForTests } from "@/app/api/email/route";
+import prisma from "@/lib/prisma";
+
+// ── Session fixtures ──────────────────────────────────────────────────────────
+const AUTHED_SESSION = {
+  user: { id: "u-bulk-email-test", email: "test@sjsu.edu", name: "Test" },
+  expires: "2099-01-01",
+};
+
+function makeRequest(body: object): Request {
+  return new Request("http://localhost/api/applications/bulk-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// ── Test DB setup ─────────────────────────────────────────────────────────────
+const TEST_EMAIL_PREFIX = "test-bulk-email-";
+let applicantId: string;
+let appIds: string[] = [];
+
+beforeEach(async () => {
+  vi.mocked(auth).mockResolvedValue(AUTHED_SESSION as any);
+  vi.mocked(sendEmail).mockClear();
+  vi.mocked(sendEmail).mockResolvedValue({ messageId: "bulk-mock-id" } as any);
+  __resetRateLimitForTests();
+
+  const applicant = await prisma.applicant.create({
+    data: {
+      email: `${TEST_EMAIL_PREFIX}${Date.now()}@test.com`,
+      name: "Bulk Email Test User",
+    },
+  });
+  applicantId = applicant.id;
+  appIds = [];
+
+  // Create 3 Interviewing applications
+  for (let i = 0; i < 3; i++) {
+    const app = await prisma.application.create({
+      data: {
+        applicant_id: applicantId,
+        role: `Role ${i}`,
+        opportunity: "Bulk Email Opportunity",
+        track: "Project",
+        status: "Interviewing",
+        season: "Fall 2025",
+      },
+    });
+    appIds.push(app.id);
+  }
+});
+
+afterEach(async () => {
+  await prisma.application.deleteMany({ where: { applicant_id: applicantId } });
+  await prisma.applicant.delete({ where: { id: applicantId } });
+});
+
+// ── Unauthenticated ───────────────────────────────────────────────────────────
+describe("POST /api/applications/bulk-email — unauthenticated", () => {
+  it("returns 401 when no session", async () => {
+    vi.mocked(auth).mockResolvedValue(null as any);
+    const res = await POST(makeRequest({ ids: [appIds[0]] }));
+    expect(res.status).toBe(401);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+});
+
+// ── Validation ────────────────────────────────────────────────────────────────
+describe("POST /api/applications/bulk-email — validation", () => {
+  it("returns 400 for empty ids array", async () => {
+    const res = await POST(makeRequest({ ids: [] }));
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when ids exceed cap of 50", async () => {
+    const bigIds = Array.from({ length: 51 }, (_, i) => `fake-id-${i}`);
+    const res = await POST(makeRequest({ ids: bigIds }));
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("strips CRLF from override subject", async () => {
+    await POST(makeRequest({
+      ids: [appIds[0]],
+      subject: "Hello\r\nBcc: attacker@evil.com",
+      body: "Body text",
+    }));
+    const callArgs = vi.mocked(sendEmail).mock.calls[0][0];
+    expect(callArgs.subject).not.toMatch(/[\r\n]/);
+  });
+});
+
+// ── Success cases ─────────────────────────────────────────────────────────────
+describe("POST /api/applications/bulk-email — success", () => {
+  it("sends N Interviewing applications, stamps interview_invite_sent on each, returns ok:true", async () => {
+    const res = await POST(makeRequest({ ids: appIds }));
+    expect(res.status).toBe(200);
+
+    const data = await res.json();
+    expect(data.results).toHaveLength(3);
+    expect(data.results.every((r: { ok: boolean }) => r.ok)).toBe(true);
+    expect(sendEmail).toHaveBeenCalledTimes(3);
+
+    // Verify timestamps stamped in DB
+    const apps = await prisma.application.findMany({ where: { applicant_id: applicantId } });
+    expect(apps.every((a) => a.interview_invite_sent !== null)).toBe(true);
+  });
+
+  it("returns messageId for each successful send", async () => {
+    const res = await POST(makeRequest({ ids: [appIds[0]] }));
+    const data = await res.json();
+    expect(data.results[0].messageId).toBe("bulk-mock-id");
+  });
+
+  it("uses preferred_email when set on the applicant", async () => {
+    await prisma.applicant.update({
+      where: { id: applicantId },
+      data: { preferred_email: "preferred-bulk@test.com" },
+    });
+
+    await POST(makeRequest({ ids: [appIds[0]] }));
+    const callArgs = vi.mocked(sendEmail).mock.calls[0][0];
+    expect(callArgs.to).toBe("preferred-bulk@test.com");
+  });
+
+  it("fills {{name}} placeholder per-recipient in override body", async () => {
+    await POST(makeRequest({
+      ids: appIds,
+      subject: "Hello {{name}}",
+      body: "Dear {{name}}, you are invited.",
+    }));
+
+    // All 3 calls should have the applicant name filled in (same applicant here)
+    for (const call of vi.mocked(sendEmail).mock.calls) {
+      const args = call[0];
+      expect(args.text).toContain("Bulk Email Test User");
+      expect(args.subject).toContain("Bulk Email Test User");
+    }
+  });
+
+  it("de-duplicates ids; each row processed once", async () => {
+    const res = await POST(makeRequest({ ids: [appIds[0], appIds[0], appIds[1]] }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    // De-duplicated to 2
+    expect(data.results).toHaveLength(2);
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── Skip cases ────────────────────────────────────────────────────────────────
+describe("POST /api/applications/bulk-email — skip cases", () => {
+  it("skips rows with existing interview_invite_sent as skipped:duplicate; does not call sendEmail for them", async () => {
+    // Pre-stamp one
+    await prisma.application.update({
+      where: { id: appIds[0] },
+      data: { interview_invite_sent: new Date() },
+    });
+
+    const res = await POST(makeRequest({ ids: appIds }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+
+    const skipped = data.results.filter((r: { ok: boolean; skipped?: string }) => !r.ok && r.skipped === "duplicate");
+    const sent = data.results.filter((r: { ok: boolean }) => r.ok);
+    expect(skipped).toHaveLength(1);
+    expect(sent).toHaveLength(2);
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips rows with status !== Interviewing as skipped:wrong-status", async () => {
+    await prisma.application.update({
+      where: { id: appIds[0] },
+      data: { status: "To Review" },
+    });
+
+    const res = await POST(makeRequest({ ids: appIds }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+
+    const skipped = data.results.filter((r: { ok: boolean; skipped?: string }) => !r.ok && r.skipped === "wrong-status");
+    expect(skipped).toHaveLength(1);
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips rows whose resolved email is invalid as skipped:no-email", async () => {
+    // Set a clearly bad email on the applicant
+    await prisma.applicant.update({
+      where: { id: applicantId },
+      data: { email: "not-a-valid-email", preferred_email: null },
+    });
+
+    const res = await POST(makeRequest({ ids: [appIds[0]] }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.results[0].ok).toBe(false);
+    expect(data.results[0].skipped).toBe("no-email");
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("returns skipped:not-found for unknown ids; other rows still succeed", async () => {
+    const unknownId = "00000000-0000-0000-0000-000000000000";
+    const res = await POST(makeRequest({ ids: [appIds[0], unknownId] }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+
+    const sent = data.results.filter((r: { ok: boolean }) => r.ok);
+    const notFound = data.results.filter((r: { ok: boolean; skipped?: string }) => !r.ok && r.skipped === "not-found");
+    expect(sent).toHaveLength(1);
+    expect(notFound).toHaveLength(1);
+    expect(notFound[0].id).toBe(unknownId);
+  });
+});
+
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+describe("POST /api/applications/bulk-email — rate limiting", () => {
+  it("returns 429 with remaining count when batch size > remaining slots; no sends performed", async () => {
+    // Use up 8 of 10 slots
+    const { reserveRateLimit } = await import("@/lib/emailRateLimit");
+    reserveRateLimit(AUTHED_SESSION.user.id, 8);
+
+    // Try to send 3 at once (only 2 remaining)
+    const res = await POST(makeRequest({ ids: appIds }));
+    expect(res.status).toBe(429);
+    const data = await res.json();
+    expect(data.error).toMatch(/too many/i);
+    expect(typeof data.retryAfterSec).toBe("number");
+    expect(data.remaining).toBe(2);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+});

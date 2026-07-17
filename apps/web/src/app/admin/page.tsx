@@ -1425,6 +1425,193 @@ const stripPillStyle: React.CSSProperties = {
   outline: "none",
 };
 
+// ── Bulk Interview Email Dialog ───────────────────────────────────────────────
+
+// Local fill helper — mirrors emailTemplates.ts internal fill() without modifying that file.
+function fillTemplate(template: string, data: { name: string; role: string; opportunity: string }): string {
+  return template
+    .replace(/\{\{name\}\}/g, data.name)
+    .replace(/\{\{role\}\}/g, data.role)
+    .replace(/\{\{opportunity\}\}/g, data.opportunity);
+}
+
+const EMAIL_RE_CLIENT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function BulkInterviewEmailDialog({
+  selectedApps,
+  onSend,
+  onClose,
+}: {
+  selectedApps: Application[];
+  onSend: (subject: string, body: string) => void;
+  onClose: () => void;
+}) {
+  // Compute default subject/body from template (first app for preview)
+  const firstApp = selectedApps[0];
+  const defaultTemplate = firstApp
+    ? getEmailTemplate("Interviewing", {
+        name: firstApp.applicant.name,
+        role: firstApp.role,
+        opportunity: firstApp.opportunity,
+      })
+    : { subject: "", body: "" };
+
+  // Use the unfilled template as editable defaults so placeholders are preserved
+  const rawTemplate = getEmailTemplate("Interviewing", {
+    name: "{{name}}",
+    role: "{{role}}",
+    opportunity: "{{opportunity}}",
+  });
+
+  const [subject, setSubject] = useState(rawTemplate.subject);
+  const [body, setBody] = useState(rawTemplate.body);
+
+  // Client-side counts (UX preview only — server is authoritative)
+  const alreadySent = selectedApps.filter((a) => !!a.interview_invite_sent).length;
+  const noEmail = selectedApps.filter((a) => !EMAIL_RE_CLIENT.test(a.applicant.email)).length;
+  const sendable = selectedApps.length - alreadySent - noEmail;
+
+  // Preview: fill subject/body for first app
+  const previewData = firstApp
+    ? { name: firstApp.applicant.name, role: firstApp.role, opportunity: firstApp.opportunity }
+    : { name: "Recipient", role: "Role", opportunity: "Opportunity" };
+  const previewSubject = fillTemplate(subject, previewData);
+  const previewBody = fillTemplate(body, previewData);
+
+  const rateLimitWarning = sendable > 10;
+  const canSend = sendable > 0 && !rateLimitWarning;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+    >
+      <div
+        className="w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl"
+        style={{ background: "#141120", border: "0.5px solid rgba(139,130,190,0.12)", borderRadius: 12 }}
+      >
+        {/* Header */}
+        <div className="px-6 py-5 shrink-0" style={{ borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: "#EAE8F2" }}>Send interview emails</h3>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {/* Counts */}
+          <div className="space-y-1">
+            <p style={{ fontSize: 13, color: "#A09BB5" }}>{sendable} recipient{sendable !== 1 ? "s" : ""}</p>
+            {alreadySent > 0 && (
+              <p style={{ fontSize: 12.5, color: "#6A6580" }}>{alreadySent} already sent — will be skipped</p>
+            )}
+            {noEmail > 0 && (
+              <p style={{ fontSize: 12.5, color: "#6A6580" }}>{noEmail} missing valid email — will be skipped</p>
+            )}
+          </div>
+
+          {/* Rate-limit warning */}
+          {rateLimitWarning && (
+            <div
+              className="px-4 py-3"
+              style={{ background: "rgba(240,176,64,0.08)", borderLeft: "3px solid #F0B040", borderRadius: 6 }}
+            >
+              <p style={{ fontSize: 13, color: "#F0B040" }}>
+                You can send up to 10 emails per minute. Try a smaller batch or wait between sends.
+              </p>
+            </div>
+          )}
+
+          {/* Subject */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 500, color: "#6A6580", display: "block", marginBottom: 6 }}>
+              Subject
+            </label>
+            <input
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className={modalInputCls}
+              style={modalInputStyle}
+            />
+          </div>
+
+          {/* Body */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 500, color: "#6A6580", display: "block", marginBottom: 6 }}>
+              Body
+            </label>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={8}
+              className={modalInputCls}
+              style={{ ...modalInputStyle, resize: "vertical" }}
+            />
+            <p style={{ fontSize: 11.5, color: "#6A6580", marginTop: 4 }}>
+              Placeholders <code style={{ color: "#9a98ab" }}>{"{{name}}"}</code>,{" "}
+              <code style={{ color: "#9a98ab" }}>{"{{role}}"}</code>,{" "}
+              <code style={{ color: "#9a98ab" }}>{"{{opportunity}}"}</code> are filled per recipient.
+            </p>
+          </div>
+
+          {/* Preview */}
+          {firstApp && (
+            <div
+              className="px-4 py-3 space-y-2"
+              style={{ background: "rgba(139,130,190,0.05)", border: "0.5px solid rgba(139,130,190,0.10)", borderRadius: 8 }}
+            >
+              <p style={{ fontSize: 11.5, fontWeight: 600, color: "#6A6580", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Preview — {firstApp.applicant.name}
+              </p>
+              <p style={{ fontSize: 12.5, color: "#A09BB5" }}>
+                <span style={{ color: "#6A6580" }}>Subject: </span>{previewSubject}
+              </p>
+              <p style={{ fontSize: 12, color: "#A09BB5", whiteSpace: "pre-wrap" }}>{previewBody}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          className="px-6 py-4 flex items-center justify-end shrink-0"
+          style={{ borderTop: "0.5px solid rgba(139,130,190,0.08)", gap: 10 }}
+        >
+          <button
+            onClick={onClose}
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: "#9a98ab",
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 8,
+              padding: "6px 16px",
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => canSend && onSend(subject, body)}
+            disabled={!canSend}
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: canSend ? "#EAE8F2" : "#6b6a78",
+              background: canSend ? "rgba(139,130,190,0.20)" : "rgba(139,130,190,0.06)",
+              border: "1px solid " + (canSend ? "rgba(167,139,250,0.35)" : "rgba(255,255,255,0.08)"),
+              borderRadius: 8,
+              padding: "6px 16px",
+              cursor: canSend ? "pointer" : "not-allowed",
+            }}
+          >
+            Send {sendable} email{sendable !== 1 ? "s" : ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -1443,6 +1630,8 @@ export default function AdminPage() {
   const [renameLoading, setRenameLoading] = useState(false);
   const [showAccessModal, setShowAccessModal] = useState(false);
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+  const [isBulkSending, setIsBulkSending] = useState(false);
+  const [showBulkEmailDialog, setShowBulkEmailDialog] = useState(false);
   const [bulkToastMessage, setBulkToastMessage] = useState<string | null>(null);
 
   const { data: session } = useSession();
@@ -1664,6 +1853,67 @@ export default function AdminPage() {
       }
     },
     [selectedIds, applications]
+  );
+
+  const handleBulkEmail = useCallback(
+    async (subject: string, body: string) => {
+      const ids = [...selectedIds];
+      if (ids.length === 0) return;
+
+      setIsBulkSending(true);
+      setShowBulkEmailDialog(false);
+      try {
+        const res = await fetch("/api/applications/bulk-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, subject, body }),
+        });
+
+        if (handleAuthFailure(res)) return;
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setBulkToastMessage(data.error ?? "Bulk email failed. Please try again.");
+          setTimeout(() => setBulkToastMessage(null), 4000);
+          return;
+        }
+
+        const data = (await res.json()) as {
+          results: Array<
+            | { id: string; ok: true; messageId: string }
+            | { id: string; ok: false; skipped?: string; error?: string }
+          >;
+        };
+
+        const sent = data.results.filter((r) => r.ok);
+        const skipped = data.results.filter((r) => !r.ok && "skipped" in r);
+        const failed = data.results.filter((r) => !r.ok && "error" in r);
+
+        // Remove sent + skipped ids from selection; keep failed ids selected
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          sent.forEach((r) => next.delete(r.id));
+          skipped.forEach((r) => next.delete(r.id));
+          return next;
+        });
+
+        // Refetch to sync interview_invite_sent timestamps
+        fetchApps();
+
+        const parts: string[] = [];
+        if (sent.length > 0) parts.push(`${sent.length} sent`);
+        if (skipped.length > 0) parts.push(`${skipped.length} skipped`);
+        if (failed.length > 0) parts.push(`${failed.length} failed`);
+        setBulkToastMessage(parts.join(" • "));
+        setTimeout(() => setBulkToastMessage(null), 4000);
+      } catch {
+        setBulkToastMessage("Bulk email failed. Please try again.");
+        setTimeout(() => setBulkToastMessage(null), 4000);
+      } finally {
+        setIsBulkSending(false);
+      }
+    },
+    [selectedIds, fetchApps]
   );
 
   async function handleRenameSubmit() {
@@ -2133,6 +2383,47 @@ export default function AdminPage() {
           >
             Move to Rejected
           </button>
+          {/* Send interview emails button — only active when ALL selected are Interviewing */}
+          {(() => {
+            const selectedApps = applications.filter((a) => selectedIds.has(a.id));
+            const allInterviewing = selectedApps.length > 0 && selectedApps.every((a) => a.status === "Interviewing");
+            const disabled = !allInterviewing || isBulkUpdating || isBulkSending;
+            const tooltipText = !allInterviewing
+              ? "Only available when all selected applicants are in Interviewing"
+              : isBulkSending
+              ? "Sending…"
+              : undefined;
+            return (
+              <button
+                onClick={() => setShowBulkEmailDialog(true)}
+                disabled={disabled}
+                title={tooltipText}
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  color: disabled ? "#6b6a78" : "#9a98ab",
+                  background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  borderRadius: 7,
+                  padding: "3px 10px",
+                  cursor: disabled ? "not-allowed" : "pointer",
+                  opacity: disabled ? 0.5 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!disabled) {
+                    (e.currentTarget as HTMLButtonElement).style.color = "#c4b5fd";
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(167,139,250,0.35)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.color = disabled ? "#6b6a78" : "#9a98ab";
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.10)";
+                }}
+              >
+                {isBulkSending ? "Sending…" : "Send interview emails…"}
+              </button>
+            );
+          })()}
         </div>
       )}
 
@@ -2171,6 +2462,15 @@ export default function AdminPage() {
       {/* Manage Access modal */}
       {showAccessModal && (
         <ManageAccessModal onClose={() => setShowAccessModal(false)} />
+      )}
+
+      {/* Bulk interview email dialog */}
+      {showBulkEmailDialog && (
+        <BulkInterviewEmailDialog
+          selectedApps={applications.filter((a) => selectedIds.has(a.id))}
+          onSend={handleBulkEmail}
+          onClose={() => setShowBulkEmailDialog(false)}
+        />
       )}
 
       {/* Bulk action toast */}

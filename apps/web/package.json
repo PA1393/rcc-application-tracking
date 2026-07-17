@@ -6,8 +6,9 @@
     "dev": "next dev --port 3001",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "node -e \"console.error('\\n\\x1b[31mTESTS DISABLED:\\x1b[0m Do not run tests until a disposable test database is configured. This repo previously ran tests against real Supabase and deleted data. Use bun run typecheck only.\\n'); process.exit(1)\"",
+    "test:watch": "node -e \"console.error('\\n\\x1b[31mTESTS DISABLED:\\x1b[0m Do not run tests until a disposable test database is configured. This repo previously ran tests against real Supabase and deleted data. Use bun run typecheck only.\\n'); process.exit(1)\"",
+    "typecheck": "tsc --noEmit",
     "seed:admin": "bun run src/scripts/seed-admin.ts"
   },
   "dependencies": {

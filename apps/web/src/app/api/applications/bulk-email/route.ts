@@ -1,0 +1,190 @@
+import { NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { reserveRateLimit } from "@/lib/emailRateLimit";
+import {
+  sendApplicationEmail,
+  MAX_SUBJECT_LEN,
+  MAX_BODY_LEN,
+  EMAIL_RE,
+  STATUS_TO_FIELD,
+  stripCrlf,
+} from "@/lib/emailService";
+import { getEmailTemplate } from "@/lib/emailTemplates";
+
+// Small fill helper — mirrors emailTemplates.ts's internal fill() without
+// modifying that file. Used to apply per-recipient placeholders to override text.
+function fill(template: string, data: { name: string; role: string; opportunity: string }): string {
+  return template
+    .replace(/\{\{name\}\}/g, data.name)
+    .replace(/\{\{role\}\}/g, data.role)
+    .replace(/\{\{opportunity\}\}/g, data.opportunity);
+}
+
+type BulkEmailResult =
+  | { id: string; ok: true; messageId: string }
+  | { id: string; ok: false; skipped: string }
+  | { id: string; ok: false; error: "server-error" };
+
+// POST /api/applications/bulk-email
+// Body: { ids: string[], subject?: string, body?: string }
+export async function POST(request: Request) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
+
+  const payload = (await request.json()) as {
+    ids?: unknown;
+    subject?: unknown;
+    body?: unknown;
+  };
+
+  // ── Validate ids ─────────────────────────────────────────────────────────
+  if (!Array.isArray(payload.ids) || payload.ids.length === 0) {
+    return NextResponse.json({ error: "ids must be a non-empty array." }, { status: 400 });
+  }
+  if (payload.ids.length > 50) {
+    return NextResponse.json(
+      { error: "ids exceeds maximum batch size of 50." },
+      { status: 400 }
+    );
+  }
+
+  // Dedupe, drop non-strings
+  const uniqueIds: string[] = [
+    ...new Set(payload.ids.filter((id): id is string => typeof id === "string")),
+  ];
+
+  // ── Validate optional subject/body overrides ──────────────────────────────
+  const subjectOverride =
+    typeof payload.subject === "string" ? payload.subject : undefined;
+  const bodyOverride =
+    typeof payload.body === "string" ? payload.body : undefined;
+
+  if (subjectOverride !== undefined) {
+    if (!subjectOverride.trim()) {
+      return NextResponse.json({ error: "Subject must not be empty." }, { status: 400 });
+    }
+    if (subjectOverride.length > MAX_SUBJECT_LEN) {
+      return NextResponse.json(
+        { error: `Subject must be ${MAX_SUBJECT_LEN} characters or fewer.` },
+        { status: 400 }
+      );
+    }
+  }
+
+  if (bodyOverride !== undefined) {
+    if (!bodyOverride.trim()) {
+      return NextResponse.json({ error: "Body must not be empty." }, { status: 400 });
+    }
+    if (bodyOverride.length > MAX_BODY_LEN) {
+      return NextResponse.json(
+        { error: `Body must be ${MAX_BODY_LEN} characters or fewer.` },
+        { status: 400 }
+      );
+    }
+  }
+
+  // ── Rate-limit: reserve all slots up front or reject ──────────────────────
+  // Note: slots reserved upfront are NOT refunded on per-row skip/failure.
+  // This is intentional over-consumption accepted for simplicity.
+  const rate = reserveRateLimit(session.user.id, uniqueIds.length);
+  if (!rate.ok) {
+    return NextResponse.json(
+      {
+        error: `Too many emails sent. Try again in ${rate.retryAfterSec}s.`,
+        retryAfterSec: rate.retryAfterSec,
+        remaining: rate.remaining,
+      },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfterSec) } }
+    );
+  }
+
+  // ── Fetch all applications + applicants in one query ──────────────────────
+  const fetched = await prisma.application.findMany({
+    where: { id: { in: uniqueIds } },
+    include: { applicant: true },
+  });
+  const fetchedMap = new Map(fetched.map((a) => [a.id, a]));
+
+  // ── Process each id in input order ───────────────────────────────────────
+  const results: BulkEmailResult[] = [];
+
+  for (const id of uniqueIds) {
+    const app = fetchedMap.get(id);
+
+    // Not found
+    if (!app) {
+      results.push({ id, ok: false, skipped: "not-found" });
+      continue;
+    }
+
+    // Wrong status
+    if (app.status !== "Interviewing") {
+      results.push({ id, ok: false, skipped: "wrong-status" });
+      continue;
+    }
+
+    // Already sent (pre-check — sendApplicationEmail will also guard)
+    if (app.interview_invite_sent) {
+      results.push({ id, ok: false, skipped: "duplicate" });
+      continue;
+    }
+
+    // Resolve recipient email
+    const rawTo = app.applicant.preferred_email ?? app.applicant.email;
+    if (!rawTo || !EMAIL_RE.test(rawTo)) {
+      results.push({ id, ok: false, skipped: "no-email" });
+      continue;
+    }
+
+    // Resolve subject & body — override with placeholder fill, or use template
+    const templateData = {
+      name: app.applicant.name,
+      role: app.role,
+      opportunity: app.opportunity,
+    };
+
+    let subject: string;
+    let body: string;
+
+    if (subjectOverride !== undefined || bodyOverride !== undefined) {
+      // Use template as fallback for whichever isn't overridden
+      const template = getEmailTemplate("Interviewing", templateData);
+      subject = subjectOverride !== undefined
+        ? fill(stripCrlf(subjectOverride), templateData)
+        : template.subject;
+      body = bodyOverride !== undefined
+        ? fill(bodyOverride, templateData)
+        : template.body;
+    } else {
+      const template = getEmailTemplate("Interviewing", templateData);
+      subject = template.subject;
+      body = template.body;
+    }
+
+    // Verify status field exists (should always be true for "Interviewing")
+    if (!STATUS_TO_FIELD[app.status]) {
+      results.push({ id, ok: false, skipped: "wrong-status" });
+      continue;
+    }
+
+    // Delegate actual send + stamp to shared helper
+    const sendResult = await sendApplicationEmail({
+      applicationId: id,
+      subject,
+      body,
+      to: rawTo,
+    });
+
+    if (sendResult.ok) {
+      results.push({ id, ok: true, messageId: sendResult.messageId });
+    } else if (sendResult.reason === "duplicate") {
+      // Race case: stamped between our check and the send
+      results.push({ id, ok: false, skipped: "duplicate" });
+    } else {
+      results.push({ id, ok: false, error: "server-error" });
+    }
+  }
+
+  return NextResponse.json({ results });
+}
