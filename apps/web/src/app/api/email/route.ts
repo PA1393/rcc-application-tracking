@@ -1,71 +1,22 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { sendEmail } from "@/lib/email";
 import { auth } from "@/lib/auth";
+import { reserveRateLimit } from "@/lib/emailRateLimit";
+import {
+  sendApplicationEmail,
+  MAX_SUBJECT_LEN,
+  MAX_BODY_LEN,
+  EMAIL_RE,
+} from "@/lib/emailService";
 
-type TimestampField = "interview_invite_sent" | "acceptance_sent_at" | "rejection_sent_at";
-
-const STATUS_TO_FIELD: Record<string, TimestampField> = {
-  Interviewing: "interview_invite_sent",
-  Accepted:     "acceptance_sent_at",
-  Rejected:     "rejection_sent_at",
-};
-
-const MAX_SUBJECT_LEN = 200;
-const MAX_BODY_LEN = 50_000;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// CRLF stripping prevents subject/to from injecting additional SMTP headers.
-function stripCrlf(s: string): string {
-  return s.replace(/[\r\n]+/g, " ").trim();
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function bodyToHtml(text: string): string {
-  return escapeHtml(text)
-    .split(/\n\n+/)
-    .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
-    .join("\n");
-}
-
-// In-process per-user rate limit. Window: RATE_MAX sends per RATE_WINDOW_MS per
-// signed-in user. Memory only — adequate for a single-instance internal ATS.
-// If we ever scale to multiple nodes, move this to Redis/DB.
-const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = 10;
-const sendLog = new Map<string, number[]>();
-
-function checkRateLimit(userId: string): { ok: true } | { ok: false; retryAfterSec: number } {
-  const now = Date.now();
-  const cutoff = now - RATE_WINDOW_MS;
-  const recent = (sendLog.get(userId) ?? []).filter((t) => t > cutoff);
-  if (recent.length >= RATE_MAX) {
-    const oldest = recent[0];
-    return { ok: false, retryAfterSec: Math.max(1, Math.ceil((oldest + RATE_WINDOW_MS - now) / 1000)) };
-  }
-  recent.push(now);
-  sendLog.set(userId, recent);
-  return { ok: true };
-}
-
-// Test-only hook. No-op in normal operation.
-export function __resetRateLimitForTests() {
-  sendLog.clear();
-}
+// Re-export so email.test.ts can import __resetRateLimitForTests from this path unchanged.
+export { __resetRateLimitForTests } from "@/lib/emailRateLimit";
 
 export async function POST(request: Request) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
 
-  const rate = checkRateLimit(session.user.id);
+  // Rate-limit check — consumes 1 slot on every allowed attempt (same as before).
+  const rate = reserveRateLimit(session.user.id, 1);
   if (!rate.ok) {
     return NextResponse.json(
       { error: `Too many emails sent. Try again in ${rate.retryAfterSec}s.` },
@@ -117,63 +68,41 @@ export async function POST(request: Request) {
     toOverride = candidate;
   }
 
-  // ── Fetch application + applicant ────────────────────────────────────────
-  const application = await prisma.application.findUnique({
-    where: { id: applicationId },
-    include: { applicant: true },
+  // ── Delegate to shared send helper ──────────────────────────────────────
+  const result = await sendApplicationEmail({
+    applicationId,
+    subject,
+    body,
+    to: toOverride,
   });
 
-  if (!application) {
-    return NextResponse.json({ error: "Application not found" }, { status: 404 });
+  if (result.ok) {
+    return NextResponse.json({ success: true, messageId: result.messageId });
   }
 
-  const timestampField = STATUS_TO_FIELD[application.status];
-  if (!timestampField) {
-    return NextResponse.json(
-      { error: `No email defined for status: "${application.status}"` },
-      { status: 400 }
-    );
-  }
-
-  // Duplicate-send guard — preserved exactly.
-  const alreadySentAt = application[timestampField] as Date | null;
-  if (alreadySentAt) {
-    return NextResponse.json(
-      { error: "Email already sent", sentAt: alreadySentAt },
-      { status: 409 }
-    );
-  }
-
-  const rawTo = toOverride ?? application.applicant.preferred_email ?? application.applicant.email;
-
-  // Final validation on resolved recipient (covers DB-stored emails too).
-  if (!EMAIL_RE.test(rawTo)) {
-    return NextResponse.json({ error: "Applicant has no valid email on file." }, { status: 400 });
-  }
-
-  // Sanitize header-sensitive fields right before send.
-  const safeSubject = stripCrlf(subject);
-  const safeTo = stripCrlf(rawTo);
-
-  try {
-    const info = await sendEmail({
-      to: safeTo,
-      subject: safeSubject,
-      text: body,
-      html: bodyToHtml(body),
-    });
-
-    // Only stamp the timestamp after a confirmed send.
-    await prisma.application.update({
-      where: { id: applicationId },
-      data: { [timestampField]: new Date() },
-    });
-
-    return NextResponse.json({ success: true, messageId: info.messageId });
-  } catch (error) {
-    return NextResponse.json(
-      { success: false, error: (error as Error).message },
-      { status: 500 }
-    );
+  switch (result.reason) {
+    case "not-found":
+      return NextResponse.json({ error: "Application not found" }, { status: 404 });
+    case "wrong-status":
+      return NextResponse.json(
+        { error: `No email defined for status: "${result.detail}"` },
+        { status: 400 }
+      );
+    case "duplicate":
+      return NextResponse.json(
+        { error: "Email already sent", sentAt: result.sentAt },
+        { status: 409 }
+      );
+    case "no-email":
+      return NextResponse.json({ error: "Applicant has no valid email on file." }, { status: 400 });
+    case "invalid-subject":
+    case "invalid-body":
+      // Should not reach here (pre-validated above), but map defensively.
+      return NextResponse.json({ error: "Invalid subject or body." }, { status: 400 });
+    case "server-error":
+      return NextResponse.json(
+        { success: false, error: result.detail ?? "Unknown error" },
+        { status: 500 }
+      );
   }
 }

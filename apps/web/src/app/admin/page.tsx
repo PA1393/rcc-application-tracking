@@ -1141,9 +1141,15 @@ function ApplicantModal({
 function ApplicantCard({
   app,
   onOpen,
+  isSelected,
+  anySelected,
+  onToggleSelect,
 }: {
   app: Application;
   onOpen: (app: Application) => void;
+  isSelected: boolean;
+  anySelected: boolean;
+  onToggleSelect: (id: string) => void;
 }) {
   const emailSent = !!(EMAIL_STATUSES as readonly string[]).includes(app.status) && !!statusToSentAt(app.status, app);
   const showSentBadge = emailSent;
@@ -1157,18 +1163,51 @@ function ApplicantCard({
     onOpen(app);
   }
 
+  function handleCheckboxClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    onToggleSelect(app.id);
+  }
+
+  const cardBorder = isSelected
+    ? "2px solid #a78bfa"
+    : "1px solid rgba(255,255,255,0.06)";
+  const cardOpacity = anySelected && !isSelected ? 0.45 : 1;
+
   return (
     <div
-      className="rcc-card relative cursor-pointer select-none"
+      className="rcc-card relative cursor-pointer select-none group"
       style={{
         padding: "13px 15px",
         borderRadius: 12,
-        background: "#15141e",
-        border: "1px solid rgba(255,255,255,0.06)",
-        transition: "transform 0.16s ease, border-color 0.16s, background 0.16s, box-shadow 0.16s",
+        background: isSelected ? "rgba(167,139,250,0.08)" : "#15141e",
+        border: cardBorder,
+        transition: "transform 0.16s ease, border-color 0.16s, background 0.16s, box-shadow 0.16s, opacity 0.16s",
+        opacity: cardOpacity,
       }}
       onClick={handleCardClick}
     >
+      {/* Selection checkbox — top-left corner */}
+      <div
+        className={`absolute top-2 left-2 z-10 ${anySelected ? "flex" : "hidden group-hover:flex"}`}
+        onClick={handleCheckboxClick}
+        style={{ alignItems: "center", justifyContent: "center" }}
+      >
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => { /* controlled via onClick */ }}
+          onClick={handleCheckboxClick}
+          aria-label={`Select ${app.applicant.name}`}
+          style={{
+            width: 15,
+            height: 15,
+            cursor: "pointer",
+            accentColor: "#a78bfa",
+            borderRadius: 4,
+          }}
+        />
+      </div>
+
       <div className="flex items-start gap-3">
         {/* Avatar */}
         <div
@@ -1243,12 +1282,29 @@ function Column({
   status,
   apps,
   onOpen,
+  selectedIds,
+  onToggleSelect,
+  onToggleAll,
 }: {
   status: Status;
   apps: Application[];
   onOpen: (app: Application) => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onToggleAll: (ids: string[]) => void;
 }) {
   const barColor = columnBarColor(status);
+  const columnIds = apps.map((a) => a.id);
+  const selectedInColumn = columnIds.filter((id) => selectedIds.has(id));
+  const allSelected = columnIds.length > 0 && selectedInColumn.length === columnIds.length;
+  const someSelected = selectedInColumn.length > 0 && !allSelected;
+  const anySelected = selectedIds.size > 0;
+
+  function handleColumnCheckbox(e: React.MouseEvent) {
+    e.stopPropagation();
+    onToggleAll(columnIds);
+  }
+
   return (
     <div
       className="flex flex-col min-w-0 overflow-hidden h-full"
@@ -1257,6 +1313,28 @@ function Column({
       {/* Column header */}
       <div className="flex items-center justify-between shrink-0" style={{ padding: "16px 18px 12px 18px" }}>
         <div className="flex items-center" style={{ gap: 10 }}>
+          {/* Column select-all checkbox */}
+          {apps.length > 0 && (
+            <div
+              className={`${anySelected ? "flex" : "hidden group-hover:flex"} items-center`}
+              style={{ marginRight: 4 }}
+            >
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                onChange={() => { /* controlled via onClick */ }}
+                onClick={handleColumnCheckbox}
+                aria-label={`Select all in ${status}`}
+                style={{
+                  width: 14,
+                  height: 14,
+                  cursor: "pointer",
+                  accentColor: "#a78bfa",
+                }}
+              />
+            </div>
+          )}
           <span
             style={{
               width: 3,
@@ -1302,7 +1380,14 @@ function Column({
         style={{ padding: "2px 14px 18px 18px", gap: 10 }}
       >
         {apps.map((app) => (
-          <ApplicantCard key={app.id} app={app} onOpen={onOpen} />
+          <ApplicantCard
+            key={app.id}
+            app={app}
+            onOpen={onOpen}
+            isSelected={selectedIds.has(app.id)}
+            anySelected={anySelected}
+            onToggleSelect={onToggleSelect}
+          />
         ))}
         {apps.length === 0 && (
           <div
@@ -1340,6 +1425,193 @@ const stripPillStyle: React.CSSProperties = {
   outline: "none",
 };
 
+// ── Bulk Interview Email Dialog ───────────────────────────────────────────────
+
+// Local fill helper — mirrors emailTemplates.ts internal fill() without modifying that file.
+function fillTemplate(template: string, data: { name: string; role: string; opportunity: string }): string {
+  return template
+    .replace(/\{\{name\}\}/g, data.name)
+    .replace(/\{\{role\}\}/g, data.role)
+    .replace(/\{\{opportunity\}\}/g, data.opportunity);
+}
+
+const EMAIL_RE_CLIENT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function BulkInterviewEmailDialog({
+  selectedApps,
+  onSend,
+  onClose,
+}: {
+  selectedApps: Application[];
+  onSend: (subject: string, body: string) => void;
+  onClose: () => void;
+}) {
+  // Compute default subject/body from template (first app for preview)
+  const firstApp = selectedApps[0];
+  const defaultTemplate = firstApp
+    ? getEmailTemplate("Interviewing", {
+        name: firstApp.applicant.name,
+        role: firstApp.role,
+        opportunity: firstApp.opportunity,
+      })
+    : { subject: "", body: "" };
+
+  // Use the unfilled template as editable defaults so placeholders are preserved
+  const rawTemplate = getEmailTemplate("Interviewing", {
+    name: "{{name}}",
+    role: "{{role}}",
+    opportunity: "{{opportunity}}",
+  });
+
+  const [subject, setSubject] = useState(rawTemplate.subject);
+  const [body, setBody] = useState(rawTemplate.body);
+
+  // Client-side counts (UX preview only — server is authoritative)
+  const alreadySent = selectedApps.filter((a) => !!a.interview_invite_sent).length;
+  const noEmail = selectedApps.filter((a) => !EMAIL_RE_CLIENT.test(a.applicant.email)).length;
+  const sendable = selectedApps.length - alreadySent - noEmail;
+
+  // Preview: fill subject/body for first app
+  const previewData = firstApp
+    ? { name: firstApp.applicant.name, role: firstApp.role, opportunity: firstApp.opportunity }
+    : { name: "Recipient", role: "Role", opportunity: "Opportunity" };
+  const previewSubject = fillTemplate(subject, previewData);
+  const previewBody = fillTemplate(body, previewData);
+
+  const rateLimitWarning = sendable > 10;
+  const canSend = sendable > 0 && !rateLimitWarning;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+    >
+      <div
+        className="w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl"
+        style={{ background: "#141120", border: "0.5px solid rgba(139,130,190,0.12)", borderRadius: 12 }}
+      >
+        {/* Header */}
+        <div className="px-6 py-5 shrink-0" style={{ borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: "#EAE8F2" }}>Send interview emails</h3>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {/* Counts */}
+          <div className="space-y-1">
+            <p style={{ fontSize: 13, color: "#A09BB5" }}>{sendable} recipient{sendable !== 1 ? "s" : ""}</p>
+            {alreadySent > 0 && (
+              <p style={{ fontSize: 12.5, color: "#6A6580" }}>{alreadySent} already sent — will be skipped</p>
+            )}
+            {noEmail > 0 && (
+              <p style={{ fontSize: 12.5, color: "#6A6580" }}>{noEmail} missing valid email — will be skipped</p>
+            )}
+          </div>
+
+          {/* Rate-limit warning */}
+          {rateLimitWarning && (
+            <div
+              className="px-4 py-3"
+              style={{ background: "rgba(240,176,64,0.08)", borderLeft: "3px solid #F0B040", borderRadius: 6 }}
+            >
+              <p style={{ fontSize: 13, color: "#F0B040" }}>
+                You can send up to 10 emails per minute. Try a smaller batch or wait between sends.
+              </p>
+            </div>
+          )}
+
+          {/* Subject */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 500, color: "#6A6580", display: "block", marginBottom: 6 }}>
+              Subject
+            </label>
+            <input
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className={modalInputCls}
+              style={modalInputStyle}
+            />
+          </div>
+
+          {/* Body */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 500, color: "#6A6580", display: "block", marginBottom: 6 }}>
+              Body
+            </label>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={8}
+              className={modalInputCls}
+              style={{ ...modalInputStyle, resize: "vertical" }}
+            />
+            <p style={{ fontSize: 11.5, color: "#6A6580", marginTop: 4 }}>
+              Placeholders <code style={{ color: "#9a98ab" }}>{"{{name}}"}</code>,{" "}
+              <code style={{ color: "#9a98ab" }}>{"{{role}}"}</code>,{" "}
+              <code style={{ color: "#9a98ab" }}>{"{{opportunity}}"}</code> are filled per recipient.
+            </p>
+          </div>
+
+          {/* Preview */}
+          {firstApp && (
+            <div
+              className="px-4 py-3 space-y-2"
+              style={{ background: "rgba(139,130,190,0.05)", border: "0.5px solid rgba(139,130,190,0.10)", borderRadius: 8 }}
+            >
+              <p style={{ fontSize: 11.5, fontWeight: 600, color: "#6A6580", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Preview — {firstApp.applicant.name}
+              </p>
+              <p style={{ fontSize: 12.5, color: "#A09BB5" }}>
+                <span style={{ color: "#6A6580" }}>Subject: </span>{previewSubject}
+              </p>
+              <p style={{ fontSize: 12, color: "#A09BB5", whiteSpace: "pre-wrap" }}>{previewBody}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          className="px-6 py-4 flex items-center justify-end shrink-0"
+          style={{ borderTop: "0.5px solid rgba(139,130,190,0.08)", gap: 10 }}
+        >
+          <button
+            onClick={onClose}
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: "#9a98ab",
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 8,
+              padding: "6px 16px",
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => canSend && onSend(subject, body)}
+            disabled={!canSend}
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: canSend ? "#EAE8F2" : "#6b6a78",
+              background: canSend ? "rgba(139,130,190,0.20)" : "rgba(139,130,190,0.06)",
+              border: "1px solid " + (canSend ? "rgba(167,139,250,0.35)" : "rgba(255,255,255,0.08)"),
+              borderRadius: 8,
+              padding: "6px 16px",
+              cursor: canSend ? "pointer" : "not-allowed",
+            }}
+          >
+            Send {sendable} email{sendable !== 1 ? "s" : ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -1351,11 +1623,16 @@ export default function AdminPage() {
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [selectedTeam, setSelectedTeam] = useState("All Teams");
   const [selectedPosition, setSelectedPosition] = useState("All Positions");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [renamingOpportunity, setRenamingOpportunity] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const [renameLoading, setRenameLoading] = useState(false);
   const [showAccessModal, setShowAccessModal] = useState(false);
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+  const [isBulkSending, setIsBulkSending] = useState(false);
+  const [showBulkEmailDialog, setShowBulkEmailDialog] = useState(false);
+  const [bulkToastMessage, setBulkToastMessage] = useState<string | null>(null);
 
   const { data: session } = useSession();
   const sessionName = session?.user?.name ?? "User";
@@ -1401,6 +1678,42 @@ export default function AdminPage() {
   useEffect(() => {
     fetchApps();
   }, [fetchApps]);
+
+  // ── Bulk selection helpers ────────────────────────────────────────────────
+  // Clear selection whenever the user switches to a different opportunity.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [selectedOpportunity]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  // Selects all ids if none/some are selected; deselects all if all are selected.
+  const toggleSelectAll = useCallback((ids: string[]) => {
+    setSelectedIds((prev) => {
+      const allIn = ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allIn) {
+        ids.forEach((id) => next.delete(id));
+      } else {
+        ids.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }, []);
 
   // E-Board apps have track="Ambassador" but no _teamPreference1 key in rawData.
   // Real Ambassador apps always have _teamPreference1 injected by normalizeAmbassadorData,
@@ -1451,6 +1764,157 @@ export default function AdminPage() {
       prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
     );
   }, []);
+
+  const handleBulkStatus = useCallback(
+    async (status: "Interviewing" | "Rejected") => {
+      const ids = [...selectedIds];
+      if (ids.length === 0) return;
+
+      // Snapshot current statuses for potential revert
+      const snapshot = new Map(
+        applications
+          .filter((a) => selectedIds.has(a.id))
+          .map((a) => [a.id, a.status])
+      );
+
+      // Optimistic update
+      setApplications((prev) =>
+        prev.map((a) => (selectedIds.has(a.id) ? { ...a, status } : a))
+      );
+
+      setIsBulkUpdating(true);
+      try {
+        const res = await fetch("/api/applications/bulk-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, status }),
+        });
+
+        if (handleAuthFailure(res)) return;
+
+        if (!res.ok) {
+          // Revert all
+          setApplications((prev) =>
+            prev.map((a) => {
+              const orig = snapshot.get(a.id);
+              return orig !== undefined ? { ...a, status: orig } : a;
+            })
+          );
+          setBulkToastMessage("Bulk update failed. Please try again.");
+          setTimeout(() => setBulkToastMessage(null), 3000);
+          return;
+        }
+
+        const data = (await res.json()) as { results: Array<{ id: string; ok: boolean; error?: string }> };
+        const failed = data.results.filter((r) => !r.ok);
+        const succeeded = data.results.filter((r) => r.ok);
+
+        // Revert failed rows
+        if (failed.length > 0) {
+          setApplications((prev) =>
+            prev.map((a) => {
+              const failedEntry = failed.find((f) => f.id === a.id);
+              if (!failedEntry) return a;
+              const orig = snapshot.get(a.id);
+              return orig !== undefined ? { ...a, status: orig } : a;
+            })
+          );
+          // Keep failed ids selected; remove succeeded ids
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            succeeded.forEach((r) => next.delete(r.id));
+            return next;
+          });
+        } else {
+          // All succeeded — clear selection
+          setSelectedIds(new Set());
+        }
+
+        const movedCount = succeeded.length;
+        const failedCount = failed.length;
+        const msg =
+          failedCount === 0
+            ? `${movedCount} moved to ${status}`
+            : `${movedCount} moved, ${failedCount} failed`;
+        setBulkToastMessage(msg);
+        setTimeout(() => setBulkToastMessage(null), 3000);
+      } catch {
+        // Network error — revert all
+        setApplications((prev) =>
+          prev.map((a) => {
+            const orig = snapshot.get(a.id);
+            return orig !== undefined ? { ...a, status: orig } : a;
+          })
+        );
+        setBulkToastMessage("Bulk update failed. Please try again.");
+        setTimeout(() => setBulkToastMessage(null), 3000);
+      } finally {
+        setIsBulkUpdating(false);
+      }
+    },
+    [selectedIds, applications]
+  );
+
+  const handleBulkEmail = useCallback(
+    async (subject: string, body: string) => {
+      const ids = [...selectedIds];
+      if (ids.length === 0) return;
+
+      setIsBulkSending(true);
+      setShowBulkEmailDialog(false);
+      try {
+        const res = await fetch("/api/applications/bulk-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, subject, body }),
+        });
+
+        if (handleAuthFailure(res)) return;
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setBulkToastMessage(data.error ?? "Bulk email failed. Please try again.");
+          setTimeout(() => setBulkToastMessage(null), 4000);
+          return;
+        }
+
+        const data = (await res.json()) as {
+          results: Array<
+            | { id: string; ok: true; messageId: string }
+            | { id: string; ok: false; skipped?: string; error?: string }
+          >;
+        };
+
+        const sent = data.results.filter((r) => r.ok);
+        const skipped = data.results.filter((r) => !r.ok && "skipped" in r);
+        const failed = data.results.filter((r) => !r.ok && "error" in r);
+
+        // Remove sent + skipped ids from selection; keep failed ids selected
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          sent.forEach((r) => next.delete(r.id));
+          skipped.forEach((r) => next.delete(r.id));
+          return next;
+        });
+
+        // Refetch to sync interview_invite_sent timestamps
+        fetchApps();
+
+        const parts: string[] = [];
+        if (sent.length > 0) parts.push(`${sent.length} sent`);
+        if (skipped.length > 0) parts.push(`${skipped.length} skipped`);
+        if (failed.length > 0) parts.push(`${failed.length} failed`);
+        setBulkToastMessage(parts.join(" • "));
+        setTimeout(() => setBulkToastMessage(null), 4000);
+      } catch {
+        setBulkToastMessage("Bulk email failed. Please try again.");
+        setTimeout(() => setBulkToastMessage(null), 4000);
+      } finally {
+        setIsBulkSending(false);
+      }
+    },
+    [selectedIds, fetchApps]
+  );
 
   async function handleRenameSubmit() {
     const trimmed = renameValue.trim();
@@ -1834,6 +2298,135 @@ export default function AdminPage() {
         />
       </div>
 
+      {/* ── Selection Toolbar (shown when 1+ cards are selected) ────────────── */}
+      {selectedIds.size > 0 && (
+        <div
+          className="shrink-0 flex items-center"
+          style={{
+            gap: 12,
+            padding: "8px 26px",
+            background: "rgba(167,139,250,0.10)",
+            borderBottom: "1px solid rgba(167,139,250,0.20)",
+          }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#c4b5fd" }}>
+            {selectedIds.size} selected
+          </span>
+          <button
+            onClick={clearSelection}
+            style={{
+              fontSize: 12.5,
+              fontWeight: 500,
+              color: "#9a98ab",
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 7,
+              padding: "3px 10px",
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#c4b5fd"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(167,139,250,0.35)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#9a98ab"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.10)"; }}
+          >
+            Clear selection
+          </button>
+          <button
+            onClick={() => handleBulkStatus("Interviewing")}
+            disabled={isBulkUpdating}
+            style={{
+              fontSize: 12.5,
+              fontWeight: 500,
+              color: isBulkUpdating ? "#6b6a78" : "#9a98ab",
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 7,
+              padding: "3px 10px",
+              cursor: isBulkUpdating ? "not-allowed" : "pointer",
+              opacity: isBulkUpdating ? 0.5 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!isBulkUpdating) {
+                (e.currentTarget as HTMLButtonElement).style.color = "#c4b5fd";
+                (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(167,139,250,0.35)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = isBulkUpdating ? "#6b6a78" : "#9a98ab";
+              (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.10)";
+            }}
+          >
+            Move to Interviewing
+          </button>
+          <button
+            onClick={() => handleBulkStatus("Rejected")}
+            disabled={isBulkUpdating}
+            style={{
+              fontSize: 12.5,
+              fontWeight: 500,
+              color: isBulkUpdating ? "#6b6a78" : "#9a98ab",
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 7,
+              padding: "3px 10px",
+              cursor: isBulkUpdating ? "not-allowed" : "pointer",
+              opacity: isBulkUpdating ? 0.5 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!isBulkUpdating) {
+                (e.currentTarget as HTMLButtonElement).style.color = "#c4b5fd";
+                (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(167,139,250,0.35)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = isBulkUpdating ? "#6b6a78" : "#9a98ab";
+              (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.10)";
+            }}
+          >
+            Move to Rejected
+          </button>
+          {/* Send interview emails button — only active when ALL selected are Interviewing */}
+          {(() => {
+            const selectedApps = applications.filter((a) => selectedIds.has(a.id));
+            const allInterviewing = selectedApps.length > 0 && selectedApps.every((a) => a.status === "Interviewing");
+            const disabled = !allInterviewing || isBulkUpdating || isBulkSending;
+            const tooltipText = !allInterviewing
+              ? "Only available when all selected applicants are in Interviewing"
+              : isBulkSending
+              ? "Sending…"
+              : undefined;
+            return (
+              <button
+                onClick={() => setShowBulkEmailDialog(true)}
+                disabled={disabled}
+                title={tooltipText}
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  color: disabled ? "#6b6a78" : "#9a98ab",
+                  background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  borderRadius: 7,
+                  padding: "3px 10px",
+                  cursor: disabled ? "not-allowed" : "pointer",
+                  opacity: disabled ? 0.5 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!disabled) {
+                    (e.currentTarget as HTMLButtonElement).style.color = "#c4b5fd";
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(167,139,250,0.35)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.color = disabled ? "#6b6a78" : "#9a98ab";
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.10)";
+                }}
+              >
+                {isBulkSending ? "Sending…" : "Send interview emails…"}
+              </button>
+            );
+          })()}
+        </div>
+      )}
+
       {/* ── ZONE 3: Board Area ─────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden" style={{ padding: "0 14px 0 0" }}>
         {loadingApps ? (
@@ -1846,6 +2439,9 @@ export default function AdminPage() {
                 status={status}
                 apps={byStatus(status)}
                 onOpen={setSelectedApp}
+                selectedIds={selectedIds}
+                onToggleSelect={toggleSelect}
+                onToggleAll={toggleSelectAll}
               />
             ))}
           </div>
@@ -1866,6 +2462,30 @@ export default function AdminPage() {
       {/* Manage Access modal */}
       {showAccessModal && (
         <ManageAccessModal onClose={() => setShowAccessModal(false)} />
+      )}
+
+      {/* Bulk interview email dialog */}
+      {showBulkEmailDialog && (
+        <BulkInterviewEmailDialog
+          selectedApps={applications.filter((a) => selectedIds.has(a.id))}
+          onSend={handleBulkEmail}
+          onClose={() => setShowBulkEmailDialog(false)}
+        />
+      )}
+
+      {/* Bulk action toast */}
+      {bulkToastMessage && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] text-sm font-medium px-5 py-2.5 shadow-lg"
+          style={{
+            background: "rgba(167,139,250,0.12)",
+            color: "#c4b5fd",
+            borderRadius: 8,
+            border: "0.5px solid rgba(167,139,250,0.25)",
+          }}
+        >
+          {bulkToastMessage}
+        </div>
       )}
     </main>
   );

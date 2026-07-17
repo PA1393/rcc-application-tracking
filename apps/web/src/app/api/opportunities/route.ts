@@ -2,6 +2,20 @@ import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
+// GET /api/opportunities → sorted distinct list of opportunity names
+export async function GET() {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
+
+  const rows = await prisma.application.findMany({
+    select: { opportunity: true },
+    distinct: ["opportunity"],
+    orderBy: { opportunity: "asc" },
+  });
+
+  return NextResponse.json(rows.map((r) => r.opportunity).filter(Boolean));
+}
+
 // PATCH /api/opportunities  body: { oldName, newName }
 export async function PATCH(request: Request) {
   const session = await auth();
