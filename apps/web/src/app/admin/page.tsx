@@ -1207,6 +1207,7 @@ function ApplicantCard({
 }) {
   const emailSent = !!(EMAIL_STATUSES as readonly string[]).includes(app.status) && !!statusToSentAt(app.status, app);
   const showSentBadge = emailSent;
+  const emailPending = (EMAIL_STATUSES as readonly string[]).includes(app.status) && !statusToSentAt(app.status, app);
   const rankedPrefs = getRankedPreferences(app.rawData);
   const showPrefers = app.track === "Ambassador" && rankedPrefs.length > 0;
 
@@ -1324,6 +1325,24 @@ function ApplicantCard({
             <span style={{ fontSize: 10.5, fontWeight: 700, color: "#34d399", letterSpacing: "0.2px" }}>
               Sent
             </span>
+          </div>
+        )}
+
+        {/* Email pending pill */}
+        {emailPending && (
+          <div
+            className="shrink-0"
+            style={{
+              padding: "3px 8px",
+              borderRadius: 999,
+              background: "rgba(240,176,64,0.10)",
+              border: "0.5px solid rgba(240,176,64,0.25)",
+              fontSize: 11,
+              fontWeight: 500,
+              color: "#F0B040",
+            }}
+          >
+            Email pending
           </div>
         )}
       </div>
