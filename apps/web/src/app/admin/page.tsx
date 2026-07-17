@@ -521,8 +521,11 @@ function ApplicantModal({
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         if (emailDraftStatus) return;
-        if (pendingStatus) setPendingStatus(null);
-        else onClose();
+        if (pendingStatus) {
+          setPendingStatus(null);
+        } else {
+          onClose();
+        }
       }
     }
     document.addEventListener("keydown", onKey);
@@ -709,9 +712,12 @@ function ApplicantModal({
                   status to{" "}
                   <span style={{ fontWeight: 600, color: "#EAE8F2" }}>{pendingStatus}</span>?
                 </p>
+
                 <div className="flex gap-2 justify-end">
                   <button
-                    onClick={() => setPendingStatus(null)}
+                    onClick={() => {
+                      setPendingStatus(null);
+                    }}
                     className="px-4 py-1.5 rounded-[8px] transition-colors"
                     style={{ fontSize: 12, border: "0.5px solid rgba(139,130,190,0.12)", color: "#A09BB5", background: "transparent" }}
                   >
@@ -953,7 +959,9 @@ function ApplicantModal({
                   {ACTION_STATUSES.filter((s) => s !== activeApp.status).map((s) => (
                     <button
                       key={s}
-                      onClick={() => setPendingStatus(s)}
+                      onClick={() => {
+                        setPendingStatus(s);
+                      }}
                       style={statusButtonBase}
                       onMouseEnter={(e) => {
                         (e.currentTarget as HTMLButtonElement).style.borderColor = "#6B5FCC";
