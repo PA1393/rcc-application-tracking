@@ -37,6 +37,7 @@ model Application{
   interview_notes         String? @db.Text
   application_notes       String? @db.Text
   decision_notes          String? @db.Text
+  interview_roles         String[] @default([]) //roles being considered for this applicant's interview
 
   rawData                 Json?  //stores the raw responses
 
