@@ -8,6 +8,7 @@ import ImportButton, {
 import { getEmailTemplate } from "@/lib/emailTemplates";
 import ManageAccessModal from "@/components/ManageAccessModal";
 import { handleAuthFailure } from "@/lib/utils";
+import { MAX_INTERVIEW_ROLES } from "@/lib/interviewRoles";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -455,6 +456,7 @@ function ApplicantModal({
   const [savingNotes, setSavingNotes] = useState(false);
   const { data: modalSession } = useSession();
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [selectedInterviewRoles, setSelectedInterviewRoles] = useState<string[]>([]);
   const [changingStatus, setChangingStatus] = useState(false);
   const [emailDraftStatus, setEmailDraftStatus] = useState<string | null>(null);
   const [previousEmailStatus, setPreviousEmailStatus] = useState<string | null>(null);
@@ -534,6 +536,10 @@ function ApplicantModal({
   }, [onClose, pendingStatus, emailDraftStatus]);
 
   const activeApp = allApps.find((a) => a.id === activeTab) ?? initialApp;
+  // E-Board rows also carry track "Ambassador" but have no ranked preference keys,
+  // so the preference list is what actually identifies the matrix cohort.
+  const interviewRoleOptions = getRankedPreferences(activeApp.rawData);
+  const canPickInterviewRoles = activeApp.track === "Ambassador" && interviewRoleOptions.length > 0;
   const visibleFields = visibleNoteFields(activeApp);
   const activeField: NoteField = visibleFields.includes(activeNotesTab) ? activeNotesTab : "application_notes";
 
@@ -556,11 +562,16 @@ function ApplicantModal({
     setChangingStatus(true);
 
     const previousStatus = activeApp.status;
+    const sendingRoles = pendingStatus === "Interviewing" && canPickInterviewRoles;
 
     const res = await fetch("/api/applications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: activeApp.id, status: pendingStatus }),
+      body: JSON.stringify({
+        id: activeApp.id,
+        status: pendingStatus,
+        ...(sendingRoles && { interview_roles: selectedInterviewRoles }),
+      }),
     });
 
     if (handleAuthFailure(res)) {
@@ -577,9 +588,14 @@ function ApplicantModal({
     }
 
     const confirmedStatus = pendingStatus;
+    const confirmedRoles = selectedInterviewRoles;
 
     setAllApps((prev) =>
-      prev.map((a) => (a.id === activeApp.id ? { ...a, status: confirmedStatus } : a))
+      prev.map((a) =>
+        a.id === activeApp.id
+          ? { ...a, status: confirmedStatus, ...(sendingRoles && { interview_roles: confirmedRoles }) }
+          : a
+      )
     );
     onStatusChange(activeApp.id, confirmedStatus);
     setPendingStatus(null);
@@ -714,9 +730,54 @@ function ApplicantModal({
                   <span style={{ fontWeight: 600, color: "#EAE8F2" }}>{pendingStatus}</span>?
                 </p>
 
+                {pendingStatus === "Interviewing" && canPickInterviewRoles && (
+                  <div className="mb-5">
+                    <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
+                      Roles being considered <span style={{ textTransform: "none" }}>(optional, up to 3)</span>
+                    </p>
+                    <div className="flex gap-2 flex-wrap">
+                      {interviewRoleOptions.map((p) => {
+                        const picked = selectedInterviewRoles.includes(p.role);
+                        const atLimit = selectedInterviewRoles.length >= MAX_INTERVIEW_ROLES;
+                        const disabled = !picked && atLimit;
+                        return (
+                          <button
+                            key={p.rank}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() =>
+                              setSelectedInterviewRoles((prev) =>
+                                prev.includes(p.role)
+                                  ? prev.filter((r) => r !== p.role)
+                                  : [...prev, p.role]
+                              )
+                            }
+                            className="transition-colors disabled:cursor-not-allowed"
+                            style={{
+                              fontSize: 11,
+                              padding: "5px 10px",
+                              borderRadius: 999,
+                              cursor: disabled ? "not-allowed" : "pointer",
+                              opacity: disabled ? 0.35 : 1,
+                              background: picked ? "rgba(167,139,250,0.16)" : "transparent",
+                              border: picked
+                                ? "0.5px solid rgba(167,139,250,0.45)"
+                                : "0.5px solid rgba(139,130,190,0.12)",
+                              color: picked ? "#a78bfa" : "#A09BB5",
+                            }}
+                          >
+                            {RANK_LABELS[p.rank]}: {p.role}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex gap-2 justify-end">
                   <button
                     onClick={() => {
+                      setSelectedInterviewRoles([]);
                       setPendingStatus(null);
                     }}
                     className="px-4 py-1.5 rounded-[8px] transition-colors"
@@ -961,6 +1022,7 @@ function ApplicantModal({
                     <button
                       key={s}
                       onClick={() => {
+                        setSelectedInterviewRoles([]);
                         setPendingStatus(s);
                       }}
                       style={statusButtonBase}
