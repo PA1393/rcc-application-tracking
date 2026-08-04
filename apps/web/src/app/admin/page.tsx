@@ -441,7 +441,7 @@ function ApplicantModal({
 }: {
   initialApp: Application;
   onClose: () => void;
-  onStatusChange: (id: string, status: string) => void;
+  onStatusChange: (id: string, status: string, interviewRoles?: string[]) => void;
   onRefreshBoard: () => void;
   boardOpportunity: string;
 }) {
@@ -597,7 +597,7 @@ function ApplicantModal({
           : a
       )
     );
-    onStatusChange(activeApp.id, confirmedStatus);
+    onStatusChange(activeApp.id, confirmedStatus, sendingRoles ? confirmedRoles : undefined);
     setPendingStatus(null);
     setChangingStatus(false);
 
@@ -894,6 +894,34 @@ function ApplicantModal({
                   }}
                 >
                   {RANK_LABELS[p.rank]}: {p.role}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Roles chosen at the Interviewing step */}
+          {activeApp.status === "Interviewing" && activeApp.interview_roles.length > 0 && (
+            <div
+              className="flex items-center gap-2 px-6 shrink-0 flex-wrap"
+              style={{ paddingTop: 10, paddingBottom: 10, borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 500, color: "#6A6580", letterSpacing: "0.3px", whiteSpace: "nowrap" }}>
+                Interviewing for
+              </span>
+              {activeApp.interview_roles.map((role) => (
+                <span
+                  key={role}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: "#a78bfa",
+                    background: "rgba(167,139,250,0.16)",
+                    borderRadius: 6,
+                    padding: "3px 8px",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {role}
                 </span>
               ))}
             </div>
@@ -1273,6 +1301,7 @@ function ApplicantCard({
   const emailPending = (EMAIL_STATUSES as readonly string[]).includes(app.status) && !statusToSentAt(app.status, app);
   const rankedPrefs = getRankedPreferences(app.rawData);
   const showPrefers = app.track === "Ambassador" && rankedPrefs.length > 0;
+  const showInterviewingFor = app.status === "Interviewing" && app.interview_roles.length > 0;
 
   function handleCardClick(e: React.MouseEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -1365,6 +1394,14 @@ function ApplicantCard({
               style={{ fontSize: 11.5, color: "#6c6a7d", fontWeight: 500, marginTop: 1 }}
             >
               {`Prefers: ${rankedPrefs.map((p) => `${p.rank}) ${p.role}`).join(" · ")}`}
+            </div>
+          )}
+          {showInterviewingFor && (
+            <div
+              className="truncate"
+              style={{ fontSize: 11.5, color: "#a78bfa", fontWeight: 500, marginTop: 2 }}
+            >
+              {`Interviewing for: ${app.interview_roles.join(", ")}`}
             </div>
           )}
         </div>
@@ -1896,11 +1933,18 @@ export default function AdminPage() {
     fetchApps();
   }, [fetchOpportunities, fetchApps, selectedOpportunity]);
 
-  const handleStatusChange = useCallback((id: string, newStatus: string) => {
-    setApplications((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
-    );
-  }, []);
+  const handleStatusChange = useCallback(
+    (id: string, newStatus: string, interviewRoles?: string[]) => {
+      setApplications((prev) =>
+        prev.map((a) =>
+          a.id === id
+            ? { ...a, status: newStatus, ...(interviewRoles !== undefined && { interview_roles: interviewRoles }) }
+            : a
+        )
+      );
+    },
+    []
+  );
 
   const handleBulkStatus = useCallback(
     async (status: "Interviewing" | "Rejected") => {
