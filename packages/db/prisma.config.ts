@@ -12,7 +12,9 @@ export default defineConfig({
     path: path.join("prisma", "migrations"),
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    // Session pooler (5432). DDL cannot run through the transaction
+    // pooler that DATABASE_URL points at.
+    url: env("DIRECT_URL"),
   },
 });
 

@@ -2,6 +2,7 @@ import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { acceptApplicant } from "@/lib/placement";
 import { auth } from "@/lib/auth";
+import { normalizeInterviewRoles } from "@/lib/interviewRoles";
 
 // GET /api/applications?opportunities=true      → distinct opportunity list
 // GET /api/applications?opportunity=<name>      → all applications for that opportunity
@@ -59,16 +60,32 @@ export async function GET(request: Request) {
   return NextResponse.json(applications);
 }
 
-// PATCH /api/applications  body: { id, status?, interview_notes?, application_notes?, decision_notes? }
+// PATCH /api/applications  body: { id, status?, interview_notes?, application_notes?, decision_notes?, interview_roles? }
 export async function PATCH(request: Request) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
 
   const body = await request.json();
-  const { id, status, interview_notes, application_notes, decision_notes } = body;
+  const { id, status, interview_notes, application_notes, decision_notes, interview_roles } = body;
 
   if (!id) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
+  }
+
+  let normalizedRoles: string[] | undefined;
+  if (interview_roles !== undefined) {
+    // The Accepted branch routes to acceptApplicant(), which would silently drop this field.
+    if (status === "Accepted") {
+      return NextResponse.json(
+        { error: "interview_roles cannot be set while accepting an applicant." },
+        { status: 400 }
+      );
+    }
+    const result = normalizeInterviewRoles(interview_roles);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    normalizedRoles = result.value;
   }
 
   const updated =
@@ -81,6 +98,7 @@ export async function PATCH(request: Request) {
             ...(interview_notes !== undefined && { interview_notes }),
             ...(application_notes !== undefined && { application_notes }),
             ...(decision_notes !== undefined && { decision_notes }),
+            ...(normalizedRoles !== undefined && { interview_roles: normalizedRoles }),
           },
         });
 

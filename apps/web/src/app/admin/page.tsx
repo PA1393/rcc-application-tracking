@@ -26,6 +26,7 @@ type Application = {
   interview_invite_sent: string | null;
   acceptance_sent_at: string | null;
   rejection_sent_at: string | null;
+  interview_roles: string[];
   rawData: Record<string, string> | null;
   applicant: { name: string; email: string };
 };
