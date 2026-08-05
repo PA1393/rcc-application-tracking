@@ -36,6 +36,27 @@ type Application = {
 const STATUSES = ["To Review", "Interviewing", "Rejected", "Accepted"] as const;
 type Status = (typeof STATUSES)[number];
 
+type ToastTone = "success" | "error" | "info";
+type Toast = { message: string; tone: ToastTone };
+
+const TOAST_TONE_STYLE: Record<ToastTone, React.CSSProperties> = {
+  success: {
+    background: "rgba(74,222,128,0.12)",
+    color: "#4ADE80",
+    border: "0.5px solid rgba(74,222,128,0.25)",
+  },
+  error: {
+    background: "rgba(240,96,96,0.12)",
+    color: "#F06060",
+    border: "0.5px solid rgba(240,96,96,0.25)",
+  },
+  info: {
+    background: "rgba(167,139,250,0.12)",
+    color: "#c4b5fd",
+    border: "0.5px solid rgba(167,139,250,0.25)",
+  },
+};
+
 // ── Color system CSS vars applied inline ─────────────────────────────────────
 // Page base:     #0C0A14
 // Surface:       #141120
@@ -440,6 +461,7 @@ function ApplicantModal({
   onStatusChange,
   onDeleted,
   onRefreshBoard,
+  onToast,
   boardOpportunity,
 }: {
   initialApp: Application;
@@ -447,6 +469,7 @@ function ApplicantModal({
   onStatusChange: (id: string, status: string, interviewRoles?: string[]) => void;
   onDeleted: (id: string) => void;
   onRefreshBoard: () => void;
+  onToast: (message: string, tone: ToastTone) => void;
   boardOpportunity: string;
 }) {
   const [allApps, setAllApps] = useState<Application[]>([initialApp]);
@@ -578,7 +601,7 @@ function ApplicantModal({
     setSavingNotes(false);
     if (handleAuthFailure(res)) return;
     if (!res.ok) {
-      window.alert("Failed to save notes. Please try again.");
+      onToast("Failed to save notes. Please try again.", "error");
     }
   }
 
@@ -608,7 +631,7 @@ function ApplicantModal({
     if (!res.ok) {
       setChangingStatus(false);
       setPendingStatus(null);
-      window.alert("Failed to update status. Please try again.");
+      onToast("Failed to update status. Please try again.", "error");
       return;
     }
 
@@ -646,7 +669,7 @@ function ApplicantModal({
     });
     if (handleAuthFailure(res)) return;
     if (!res.ok) {
-      window.alert("Failed to revert status. Please try again.");
+      onToast("Failed to revert status. Please try again.", "error");
       return;
     }
     const reverted = previousEmailStatus;
@@ -2080,8 +2103,21 @@ export default function AdminPage() {
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
   const [isBulkSending, setIsBulkSending] = useState(false);
   const [showBulkEmailDialog, setShowBulkEmailDialog] = useState(false);
-  const [bulkToastMessage, setBulkToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+
+  // Always a fresh object, so repeated identical messages still restart the timer.
+  const showToast = useCallback((message: string, tone: ToastTone = "info") => {
+    setToast({ message, tone });
+  }, []);
+
+  // Single owner of the dismiss timer — the cleanup is what stops an earlier
+  // toast's timer from cutting a later one short.
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), toast.tone === "error" ? 4000 : 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const { data: session } = useSession();
   const sessionName = session?.user?.name ?? "User";
@@ -2242,8 +2278,7 @@ export default function AdminPage() {
         setApplications((prev) =>
           prev.map((a) => (a.id === id ? { ...a, status: previousStatus } : a))
         );
-        setBulkToastMessage("Failed to move applicant. Please try again.");
-        setTimeout(() => setBulkToastMessage(null), 3000);
+        showToast("Failed to move applicant. Please try again.", "error");
       }
 
       try {
@@ -2253,12 +2288,16 @@ export default function AdminPage() {
           body: JSON.stringify({ id, status: newStatus }),
         });
         if (handleAuthFailure(res)) return;
-        if (!res.ok) revert();
+        if (!res.ok) {
+          revert();
+          return;
+        }
+        showToast(`Moved to ${newStatus}`, "success");
       } catch {
         revert();
       }
     },
-    [applications]
+    [applications, showToast]
   );
 
   const handleCardDragStart = useCallback((id: string) => setDraggingId(id), []);
@@ -2272,7 +2311,8 @@ export default function AdminPage() {
       next.delete(id);
       return next;
     });
-  }, []);
+    showToast("Application deleted", "success");
+  }, [showToast]);
 
   const handleBulkStatus = useCallback(
     async (status: "Interviewing" | "Rejected") => {
@@ -2309,8 +2349,7 @@ export default function AdminPage() {
               return orig !== undefined ? { ...a, status: orig } : a;
             })
           );
-          setBulkToastMessage("Bulk update failed. Please try again.");
-          setTimeout(() => setBulkToastMessage(null), 3000);
+          showToast("Bulk update failed. Please try again.", "error");
           return;
         }
 
@@ -2345,8 +2384,7 @@ export default function AdminPage() {
           failedCount === 0
             ? `${movedCount} moved to ${status}`
             : `${movedCount} moved, ${failedCount} failed`;
-        setBulkToastMessage(msg);
-        setTimeout(() => setBulkToastMessage(null), 3000);
+        showToast(msg, failedCount === 0 ? "success" : "error");
       } catch {
         // Network error — revert all
         setApplications((prev) =>
@@ -2355,13 +2393,12 @@ export default function AdminPage() {
             return orig !== undefined ? { ...a, status: orig } : a;
           })
         );
-        setBulkToastMessage("Bulk update failed. Please try again.");
-        setTimeout(() => setBulkToastMessage(null), 3000);
+        showToast("Bulk update failed. Please try again.", "error");
       } finally {
         setIsBulkUpdating(false);
       }
     },
-    [selectedIds, applications]
+    [selectedIds, applications, showToast]
   );
 
   const handleBulkEmail = useCallback(
@@ -2382,8 +2419,7 @@ export default function AdminPage() {
 
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          setBulkToastMessage(data.error ?? "Bulk email failed. Please try again.");
-          setTimeout(() => setBulkToastMessage(null), 4000);
+          showToast(data.error ?? "Bulk email failed. Please try again.", "error");
           return;
         }
 
@@ -2413,16 +2449,14 @@ export default function AdminPage() {
         if (sent.length > 0) parts.push(`${sent.length} sent`);
         if (skipped.length > 0) parts.push(`${skipped.length} skipped`);
         if (failed.length > 0) parts.push(`${failed.length} failed`);
-        setBulkToastMessage(parts.join(" • "));
-        setTimeout(() => setBulkToastMessage(null), 4000);
+        showToast(parts.join(" • "), failed.length === 0 ? "success" : "error");
       } catch {
-        setBulkToastMessage("Bulk email failed. Please try again.");
-        setTimeout(() => setBulkToastMessage(null), 4000);
+        showToast("Bulk email failed. Please try again.", "error");
       } finally {
         setIsBulkSending(false);
       }
     },
-    [selectedIds, fetchApps]
+    [selectedIds, fetchApps, showToast]
   );
 
   async function handleRenameSubmit() {
@@ -2969,6 +3003,7 @@ export default function AdminPage() {
           onStatusChange={handleStatusChange}
           onDeleted={handleDeleted}
           onRefreshBoard={fetchApps}
+          onToast={showToast}
           boardOpportunity={selectedOpportunity}
         />
       )}
@@ -2988,17 +3023,12 @@ export default function AdminPage() {
       )}
 
       {/* Bulk action toast */}
-      {bulkToastMessage && (
+      {toast && (
         <div
           className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] text-sm font-medium px-5 py-2.5 shadow-lg"
-          style={{
-            background: "rgba(167,139,250,0.12)",
-            color: "#c4b5fd",
-            borderRadius: 8,
-            border: "0.5px solid rgba(167,139,250,0.25)",
-          }}
+          style={{ ...TOAST_TONE_STYLE[toast.tone], borderRadius: 8 }}
         >
-          {bulkToastMessage}
+          {toast.message}
         </div>
       )}
     </main>
