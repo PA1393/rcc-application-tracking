@@ -1471,12 +1471,18 @@ function ApplicantCard({
   isSelected,
   anySelected,
   onToggleSelect,
+  isDragging,
+  onDragStart,
+  onDragEnd,
 }: {
   app: Application;
   onOpen: (app: Application) => void;
   isSelected: boolean;
   anySelected: boolean;
   onToggleSelect: (id: string) => void;
+  isDragging: boolean;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
 }) {
   const emailSent = !!(EMAIL_STATUSES as readonly string[]).includes(app.status) && !!statusToSentAt(app.status, app);
   const showSentBadge = emailSent;
@@ -1503,16 +1509,28 @@ function ApplicantCard({
     : "1px solid rgba(255,255,255,0.06)";
   const cardOpacity = anySelected && !isSelected ? 0.45 : 1;
 
+  // Accepting creates a Placement keyed on applicant+track+season with no reference
+  // back to the application, and closes sibling applications. Dragging out of
+  // Accepted would orphan that placement, so Accepted cards never move by drag.
+  const canDrag = !anySelected && app.status !== "Accepted";
+
   return (
     <div
       className="rcc-card relative cursor-pointer select-none group"
+      draggable={canDrag}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", app.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart(app.id);
+      }}
+      onDragEnd={onDragEnd}
       style={{
         padding: "13px 15px",
         borderRadius: 12,
         background: isSelected ? "rgba(167,139,250,0.08)" : "#15141e",
         border: cardBorder,
         transition: "transform 0.16s ease, border-color 0.16s, background 0.16s, box-shadow 0.16s, opacity 0.16s",
-        opacity: cardOpacity,
+        opacity: isDragging ? 0.4 : cardOpacity,
       }}
       onClick={handleCardClick}
     >
@@ -1520,6 +1538,9 @@ function ApplicantCard({
       <div
         className={`absolute top-2 left-2 z-10 ${anySelected ? "flex" : "hidden group-hover:flex"}`}
         onClick={handleCheckboxClick}
+        // Cancelling dragstart here stops a drag begun on the checkbox from dragging
+        // the card. draggable={false} on a child is not reliable across browsers.
+        onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
         style={{ alignItems: "center", justifyContent: "center" }}
       >
         <input
@@ -1644,6 +1665,10 @@ function Column({
   selectedIds,
   onToggleSelect,
   onToggleAll,
+  draggingId,
+  onCardDrop,
+  onCardDragStart,
+  onCardDragEnd,
 }: {
   status: Status;
   apps: Application[];
@@ -1651,7 +1676,25 @@ function Column({
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onToggleAll: (ids: string[]) => void;
+  draggingId: string | null;
+  onCardDrop: (id: string, status: Status) => void;
+  onCardDragStart: (id: string) => void;
+  onCardDragEnd: () => void;
 }) {
+  const [isDragOver, setIsDragOver] = useState(false);
+  // dragenter/dragleave also fire when crossing child elements, so depth-count
+  // them rather than clearing the highlight on the first dragleave.
+  const dragDepth = useRef(0);
+  // Accepted runs placement logic, so it is never a drop target.
+  const canDrop = draggingId !== null && status !== "Accepted";
+
+  useEffect(() => {
+    if (draggingId !== null) return;
+    dragDepth.current = 0;
+    setIsDragOver(false);
+  }, [draggingId]);
+
+  const showDropTarget = canDrop && isDragOver;
   const barColor = columnBarColor(status);
   const columnIds = apps.map((a) => a.id);
   const selectedInColumn = columnIds.filter((id) => selectedIds.has(id));
@@ -1736,7 +1779,47 @@ function Column({
       {/* Card list */}
       <div
         className="flex-1 overflow-y-auto flex flex-col"
-        style={{ padding: "2px 14px 18px 18px", gap: 10 }}
+        style={{
+          padding: "2px 14px 18px 18px",
+          gap: 10,
+          borderRadius: 12,
+          background: showDropTarget ? `${barColor}14` : "transparent",
+          outline: showDropTarget ? `1.5px dashed ${barColor}` : "none",
+          outlineOffset: -6,
+          transition: "background 0.15s",
+        }}
+        onDragOver={(e) => {
+          if (!canDrop) return;
+          // Only calling preventDefault on droppable columns is what makes the
+          // browser show the "no drop" cursor over Accepted.
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+        }}
+        onDragEnter={() => {
+          if (!canDrop) return;
+          dragDepth.current += 1;
+          setIsDragOver(true);
+        }}
+        onDragLeave={() => {
+          if (!canDrop) return;
+          dragDepth.current -= 1;
+          if (dragDepth.current <= 0) {
+            dragDepth.current = 0;
+            setIsDragOver(false);
+          }
+        }}
+        onDrop={(e) => {
+          if (!canDrop) return;
+          e.preventDefault();
+          dragDepth.current = 0;
+          setIsDragOver(false);
+          // The optimistic move unmounts the source card before the browser can
+          // fire dragend on it, so that handler cannot be relied on to clear the
+          // drag state after a cross-column drop. Clear it here instead.
+          onCardDragEnd();
+          const id = e.dataTransfer.getData("text/plain");
+          if (id) onCardDrop(id, status);
+        }}
       >
         {apps.map((app) => (
           <ApplicantCard
@@ -1746,6 +1829,9 @@ function Column({
             isSelected={selectedIds.has(app.id)}
             anySelected={anySelected}
             onToggleSelect={onToggleSelect}
+            isDragging={draggingId === app.id}
+            onDragStart={onCardDragStart}
+            onDragEnd={onCardDragEnd}
           />
         ))}
         {apps.length === 0 && (
@@ -1755,7 +1841,10 @@ function Column({
               marginTop: 8,
               padding: "30px 16px",
               borderRadius: 12,
-              border: "1.5px dashed rgba(255,255,255,0.08)",
+              border: showDropTarget
+                ? `1.5px dashed ${barColor}`
+                : "1.5px dashed rgba(255,255,255,0.08)",
+              transition: "border-color 0.15s",
             }}
           >
             <span style={{ fontSize: 12.5, color: "#565465", fontWeight: 500 }}>No applicants</span>
@@ -1992,6 +2081,7 @@ export default function AdminPage() {
   const [isBulkSending, setIsBulkSending] = useState(false);
   const [showBulkEmailDialog, setShowBulkEmailDialog] = useState(false);
   const [bulkToastMessage, setBulkToastMessage] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const { data: session } = useSession();
   const sessionName = session?.user?.name ?? "User";
@@ -2130,6 +2220,49 @@ export default function AdminPage() {
     },
     []
   );
+
+  const handleCardDrop = useCallback(
+    async (id: string, newStatus: Status) => {
+      // Cleared before every early return below so no path can leave a card
+      // stuck at drag opacity.
+      setDraggingId(null);
+      const app = applications.find((a) => a.id === id);
+      if (!app) return;
+      if (app.status === newStatus) return;
+      // Accepted triggers placement logic and closes sibling applications, so it
+      // stays behind the modal's confirmation flow. The column also refuses drops.
+      if (newStatus === "Accepted") return;
+
+      const previousStatus = app.status;
+      setApplications((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
+      );
+
+      function revert() {
+        setApplications((prev) =>
+          prev.map((a) => (a.id === id ? { ...a, status: previousStatus } : a))
+        );
+        setBulkToastMessage("Failed to move applicant. Please try again.");
+        setTimeout(() => setBulkToastMessage(null), 3000);
+      }
+
+      try {
+        const res = await fetch("/api/applications", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, status: newStatus }),
+        });
+        if (handleAuthFailure(res)) return;
+        if (!res.ok) revert();
+      } catch {
+        revert();
+      }
+    },
+    [applications]
+  );
+
+  const handleCardDragStart = useCallback((id: string) => setDraggingId(id), []);
+  const handleCardDragEnd = useCallback(() => setDraggingId(null), []);
 
   const handleDeleted = useCallback((id: string) => {
     setApplications((prev) => prev.filter((a) => a.id !== id));
@@ -2818,6 +2951,10 @@ export default function AdminPage() {
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
                 onToggleAll={toggleSelectAll}
+                draggingId={draggingId}
+                onCardDrop={handleCardDrop}
+                onCardDragStart={handleCardDragStart}
+                onCardDragEnd={handleCardDragEnd}
               />
             ))}
           </div>
