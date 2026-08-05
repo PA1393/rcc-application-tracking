@@ -9,6 +9,7 @@ import { getEmailTemplate } from "@/lib/emailTemplates";
 import ManageAccessModal from "@/components/ManageAccessModal";
 import { handleAuthFailure } from "@/lib/utils";
 import { MAX_INTERVIEW_ROLES } from "@/lib/interviewRoles";
+import { DELETE_APPLICATION_PHRASE, matchesDeletePhrase } from "@/lib/deleteConfirmation";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -437,12 +438,14 @@ function ApplicantModal({
   initialApp,
   onClose,
   onStatusChange,
+  onDeleted,
   onRefreshBoard,
   boardOpportunity,
 }: {
   initialApp: Application;
   onClose: () => void;
   onStatusChange: (id: string, status: string, interviewRoles?: string[]) => void;
+  onDeleted: (id: string) => void;
   onRefreshBoard: () => void;
   boardOpportunity: string;
 }) {
@@ -463,6 +466,10 @@ function ApplicantModal({
   const [previousEmailStatus, setPreviousEmailStatus] = useState<string | null>(null);
   const [emailIsManual, setEmailIsManual] = useState(false);
   const [toastVisible, setToastVisible] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePhrase, setDeletePhrase] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesPanelWidth, setNotesPanelWidth] = useState(NOTES_DEFAULT_WIDTH);
   const [isDragging, setIsDragging] = useState(false);
@@ -515,6 +522,13 @@ function ApplicantModal({
     });
   }, [activeTab, allApps]);
 
+  // A typed confirmation phrase must never carry across to a different application.
+  useEffect(() => {
+    setDeleteOpen(false);
+    setDeletePhrase("");
+    setDeleteError(null);
+  }, [activeTab]);
+
   useEffect(() => {
     if (!toastVisible) return;
     const timer = setTimeout(() => setToastVisible(false), 3000);
@@ -527,6 +541,11 @@ function ApplicantModal({
         if (emailDraftStatus) return;
         if (pendingStatus) {
           setPendingStatus(null);
+        } else if (deleteOpen) {
+          if (deleting) return;
+          setDeleteOpen(false);
+          setDeletePhrase("");
+          setDeleteError(null);
         } else {
           onClose();
         }
@@ -534,7 +553,7 @@ function ApplicantModal({
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, pendingStatus, emailDraftStatus]);
+  }, [onClose, pendingStatus, emailDraftStatus, deleteOpen, deleting]);
 
   const activeApp = allApps.find((a) => a.id === activeTab) ?? initialApp;
   // E-Board rows also carry track "Ambassador" but have no ranked preference keys,
@@ -542,6 +561,11 @@ function ApplicantModal({
   const interviewRoleOptions = getRankedPreferences(activeApp.rawData);
   const canPickInterviewRoles = activeApp.track === "Ambassador" && interviewRoleOptions.length > 0;
   const visibleFields = visibleNoteFields(activeApp);
+  // Mirrors the server's 409 guard: a Placement keys on applicant+track+season and
+  // holds no reference back to the application, so deleting an accepted one would
+  // orphan it. The UI blocks it early; the server still rejects it either way.
+  const deleteBlocked = activeApp.status === "Accepted";
+  const canConfirmDelete = !deleteBlocked && !deleting && matchesDeletePhrase(deletePhrase);
   const activeField: NoteField = visibleFields.includes(activeNotesTab) ? activeNotesTab : "application_notes";
 
   async function saveNotes() {
@@ -632,6 +656,41 @@ function ApplicantModal({
     onStatusChange(activeApp.id, reverted);
     setEmailDraftStatus(null);
     setPreviousEmailStatus(null);
+  }
+
+  async function handleDelete() {
+    if (!canConfirmDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch("/api/applications", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: activeApp.id, confirmation: deletePhrase }),
+      });
+      if (handleAuthFailure(res)) return;
+      const data = await res.json();
+      if (!res.ok) {
+        setDeleteError(data.error ?? "Failed to delete application.");
+        return;
+      }
+      const deletedId = activeApp.id;
+      const remaining = allApps.filter((a) => a.id !== deletedId);
+      onDeleted(deletedId);
+      if (remaining.length === 0) {
+        onClose();
+        return;
+      }
+      // Keep the modal open on the applicant's next remaining application.
+      setAllApps(remaining);
+      setActiveTab(remaining[0].id);
+      setDeleteOpen(false);
+      setDeletePhrase("");
+    } catch {
+      setDeleteError("Network error. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const activeStatusColor = statusColor(activeApp.status);
@@ -1126,6 +1185,128 @@ function ApplicantModal({
                   </div>
                 );
               })()}
+
+              {/* Danger Zone */}
+              <div
+                style={{
+                  borderTop: "0.5px solid rgba(240,96,96,0.16)",
+                  paddingTop: 16,
+                  marginTop: 4,
+                }}
+              >
+                <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#F06060" }}>
+                  Danger Zone
+                </p>
+
+                {!deleteOpen ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        setDeleteError(null);
+                        setDeletePhrase("");
+                        setDeleteOpen(true);
+                      }}
+                      disabled={deleteBlocked}
+                      style={{
+                        ...statusButtonBase,
+                        color: deleteBlocked ? "#6A6580" : "#F06060",
+                        borderColor: deleteBlocked
+                          ? "rgba(139,130,190,0.12)"
+                          : "rgba(240,96,96,0.28)",
+                        cursor: deleteBlocked ? "not-allowed" : "pointer",
+                        opacity: deleteBlocked ? 0.5 : 1,
+                      }}
+                      onMouseEnter={(e) => {
+                        if (deleteBlocked) return;
+                        (e.currentTarget as HTMLButtonElement).style.background = "rgba(240,96,96,0.10)";
+                        (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(240,96,96,0.5)";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (deleteBlocked) return;
+                        (e.currentTarget as HTMLButtonElement).style.background = "#1C1930";
+                        (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(240,96,96,0.28)";
+                      }}
+                    >
+                      Delete application
+                    </button>
+                    <p className="mt-2" style={{ fontSize: 11, color: "#6A6580", lineHeight: 1.5 }}>
+                      {deleteBlocked
+                        ? "Accepted applications cannot be deleted because a placement record may depend on them."
+                        : "Permanently deletes this one application. The applicant and their other applications are not affected."}
+                    </p>
+                  </>
+                ) : (
+                  <div
+                    style={{
+                      background: "rgba(240,96,96,0.05)",
+                      border: "0.5px solid rgba(240,96,96,0.22)",
+                      borderRadius: 8,
+                      padding: 14,
+                    }}
+                  >
+                    <p style={{ fontSize: 12.5, color: "#EAE8F2", lineHeight: 1.6 }}>
+                      Delete <strong>{activeApp.applicant.name}</strong>&rsquo;s application for{" "}
+                      <strong>{activeApp.role}</strong>?
+                    </p>
+                    <p className="mt-1" style={{ fontSize: 11, color: "#A09BB5", lineHeight: 1.5 }}>
+                      This cannot be undone. Notes, interview roles, and email history for this
+                      application are removed with it.
+                    </p>
+
+                    <p className="mt-3 mb-1.5" style={{ fontSize: 11, color: "#A09BB5" }}>
+                      Type <span style={{ color: "#F06060" }}>{DELETE_APPLICATION_PHRASE}</span> to confirm
+                    </p>
+                    <input
+                      type="text"
+                      value={deletePhrase}
+                      onChange={(e) => setDeletePhrase(e.target.value)}
+                      placeholder={DELETE_APPLICATION_PHRASE}
+                      autoFocus
+                      disabled={deleting}
+                      className={modalInputCls}
+                      style={{ ...modalInputStyle, fontSize: 12.5 }}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = "#F06060"; }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(139,130,190,0.12)"; }}
+                    />
+
+                    {deleteError && (
+                      <p className="mt-2" style={{ fontSize: 11.5, color: "#F06060", lineHeight: 1.5 }}>
+                        {deleteError}
+                      </p>
+                    )}
+
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => {
+                          setDeleteOpen(false);
+                          setDeletePhrase("");
+                          setDeleteError(null);
+                        }}
+                        disabled={deleting}
+                        style={{ ...statusButtonBase, cursor: deleting ? "not-allowed" : "pointer" }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDelete}
+                        disabled={!canConfirmDelete}
+                        style={{
+                          ...statusButtonBase,
+                          background: canConfirmDelete ? "rgba(240,96,96,0.14)" : "#1C1930",
+                          borderColor: canConfirmDelete
+                            ? "rgba(240,96,96,0.45)"
+                            : "rgba(139,130,190,0.12)",
+                          color: canConfirmDelete ? "#F06060" : "#6A6580",
+                          cursor: canConfirmDelete ? "pointer" : "not-allowed",
+                          opacity: canConfirmDelete ? 1 : 0.5,
+                        }}
+                      >
+                        {deleting ? "Deleting…" : "Delete application"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* RIGHT: Side notes panel */}
@@ -1950,6 +2131,16 @@ export default function AdminPage() {
     []
   );
 
+  const handleDeleted = useCallback((id: string) => {
+    setApplications((prev) => prev.filter((a) => a.id !== id));
+    setSelectedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
   const handleBulkStatus = useCallback(
     async (status: "Interviewing" | "Rejected") => {
       const ids = [...selectedIds];
@@ -2639,6 +2830,7 @@ export default function AdminPage() {
           initialApp={selectedApp}
           onClose={() => setSelectedApp(null)}
           onStatusChange={handleStatusChange}
+          onDeleted={handleDeleted}
           onRefreshBoard={fetchApps}
           boardOpportunity={selectedOpportunity}
         />
