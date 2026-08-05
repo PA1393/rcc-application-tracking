@@ -228,6 +228,7 @@ function EmailDraftModal({
     name: app.applicant.name,
     role: app.role,
     opportunity: app.opportunity,
+    roles: app.interview_roles,
   });
 
   const [to, setTo] = useState(app.applicant.email);
