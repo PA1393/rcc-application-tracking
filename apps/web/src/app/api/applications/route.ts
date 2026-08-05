@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { acceptApplicant } from "@/lib/placement";
 import { auth } from "@/lib/auth";
 import { normalizeInterviewRoles } from "@/lib/interviewRoles";
+import { DELETE_APPLICATION_PHRASE, matchesDeletePhrase } from "@/lib/deleteConfirmation";
 
 // GET /api/applications?opportunities=true      → distinct opportunity list
 // GET /api/applications?opportunity=<name>      → all applications for that opportunity
@@ -103,4 +104,48 @@ export async function PATCH(request: Request) {
         });
 
   return NextResponse.json(updated);
+}
+
+// DELETE /api/applications  body: { id, confirmation }
+// Removes a single application row. The Applicant row is intentionally left in
+// place: applicants are reused by email on re-import, and may own placements
+// from other tracks.
+export async function DELETE(request: Request) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
+
+  const body = await request.json();
+  const { id, confirmation } = body;
+
+  if (!id || typeof id !== "string") {
+    return NextResponse.json({ error: "id required" }, { status: 400 });
+  }
+
+  if (!matchesDeletePhrase(confirmation)) {
+    return NextResponse.json(
+      { error: `Confirmation phrase must be exactly: "${DELETE_APPLICATION_PHRASE}"` },
+      { status: 400 }
+    );
+  }
+
+  const existing = await prisma.application.findUnique({ where: { id } });
+  if (!existing) {
+    return NextResponse.json({ error: "Application not found." }, { status: 404 });
+  }
+
+  // Placement rows key on applicant_id + track + season and hold no reference to
+  // the application, so deleting an accepted one would orphan the placement.
+  if (existing.status === "Accepted") {
+    return NextResponse.json(
+      {
+        error:
+          "Accepted applications cannot be deleted because a placement record may depend on them. Delete is only allowed for non-accepted applications.",
+      },
+      { status: 409 }
+    );
+  }
+
+  await prisma.application.delete({ where: { id } });
+
+  return NextResponse.json({ ok: true });
 }
