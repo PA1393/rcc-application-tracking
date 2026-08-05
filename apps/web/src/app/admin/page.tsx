@@ -1383,12 +1383,15 @@ function ApplicantCard({
           >
             {app.applicant.name}
           </div>
-          <div
-            className="truncate"
-            style={{ fontSize: 12.5, color: "#9a98ab", fontWeight: 500 }}
-          >
-            {app.role}
-          </div>
+          {/* Matrix imports set role to the 1st preference, so the Prefers line already shows it. */}
+          {!showPrefers && (
+            <div
+              className="truncate"
+              style={{ fontSize: 12.5, color: "#9a98ab", fontWeight: 500 }}
+            >
+              {app.role}
+            </div>
+          )}
           {showPrefers && (
             <div
               className="truncate"
