@@ -2,6 +2,8 @@ import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { acceptApplicant } from "@/lib/placement";
 import { auth } from "@/lib/auth";
+import { normalizeInterviewRoles } from "@/lib/interviewRoles";
+import { DELETE_APPLICATION_PHRASE, matchesDeletePhrase } from "@/lib/deleteConfirmation";
 
 // GET /api/applications?opportunities=true      → distinct opportunity list
 // GET /api/applications?opportunity=<name>      → all applications for that opportunity
@@ -59,16 +61,32 @@ export async function GET(request: Request) {
   return NextResponse.json(applications);
 }
 
-// PATCH /api/applications  body: { id, status?, interview_notes?, application_notes?, decision_notes? }
+// PATCH /api/applications  body: { id, status?, interview_notes?, application_notes?, decision_notes?, interview_roles? }
 export async function PATCH(request: Request) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
 
   const body = await request.json();
-  const { id, status, interview_notes, application_notes, decision_notes } = body;
+  const { id, status, interview_notes, application_notes, decision_notes, interview_roles } = body;
 
   if (!id) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
+  }
+
+  let normalizedRoles: string[] | undefined;
+  if (interview_roles !== undefined) {
+    // The Accepted branch routes to acceptApplicant(), which would silently drop this field.
+    if (status === "Accepted") {
+      return NextResponse.json(
+        { error: "interview_roles cannot be set while accepting an applicant." },
+        { status: 400 }
+      );
+    }
+    const result = normalizeInterviewRoles(interview_roles);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    normalizedRoles = result.value;
   }
 
   const updated =
@@ -81,8 +99,53 @@ export async function PATCH(request: Request) {
             ...(interview_notes !== undefined && { interview_notes }),
             ...(application_notes !== undefined && { application_notes }),
             ...(decision_notes !== undefined && { decision_notes }),
+            ...(normalizedRoles !== undefined && { interview_roles: normalizedRoles }),
           },
         });
 
   return NextResponse.json(updated);
+}
+
+// DELETE /api/applications  body: { id, confirmation }
+// Removes a single application row. The Applicant row is intentionally left in
+// place: applicants are reused by email on re-import, and may own placements
+// from other tracks.
+export async function DELETE(request: Request) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
+
+  const body = await request.json();
+  const { id, confirmation } = body;
+
+  if (!id || typeof id !== "string") {
+    return NextResponse.json({ error: "id required" }, { status: 400 });
+  }
+
+  if (!matchesDeletePhrase(confirmation)) {
+    return NextResponse.json(
+      { error: `Confirmation phrase must be exactly: "${DELETE_APPLICATION_PHRASE}"` },
+      { status: 400 }
+    );
+  }
+
+  const existing = await prisma.application.findUnique({ where: { id } });
+  if (!existing) {
+    return NextResponse.json({ error: "Application not found." }, { status: 404 });
+  }
+
+  // Placement rows key on applicant_id + track + season and hold no reference to
+  // the application, so deleting an accepted one would orphan the placement.
+  if (existing.status === "Accepted") {
+    return NextResponse.json(
+      {
+        error:
+          "Accepted applications cannot be deleted because a placement record may depend on them. Delete is only allowed for non-accepted applications.",
+      },
+      { status: 409 }
+    );
+  }
+
+  await prisma.application.delete({ where: { id } });
+
+  return NextResponse.json({ ok: true });
 }

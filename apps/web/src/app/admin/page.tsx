@@ -8,6 +8,8 @@ import ImportButton, {
 import { getEmailTemplate } from "@/lib/emailTemplates";
 import ManageAccessModal from "@/components/ManageAccessModal";
 import { handleAuthFailure } from "@/lib/utils";
+import { MAX_INTERVIEW_ROLES } from "@/lib/interviewRoles";
+import { DELETE_APPLICATION_PHRASE, matchesDeletePhrase } from "@/lib/deleteConfirmation";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,12 +28,34 @@ type Application = {
   interview_invite_sent: string | null;
   acceptance_sent_at: string | null;
   rejection_sent_at: string | null;
+  interview_roles: string[];
   rawData: Record<string, string> | null;
   applicant: { name: string; email: string };
 };
 
 const STATUSES = ["To Review", "Interviewing", "Rejected", "Accepted"] as const;
 type Status = (typeof STATUSES)[number];
+
+type ToastTone = "success" | "error" | "info";
+type Toast = { message: string; tone: ToastTone };
+
+const TOAST_TONE_STYLE: Record<ToastTone, React.CSSProperties> = {
+  success: {
+    background: "rgba(74,222,128,0.12)",
+    color: "#4ADE80",
+    border: "0.5px solid rgba(74,222,128,0.25)",
+  },
+  error: {
+    background: "rgba(240,96,96,0.12)",
+    color: "#F06060",
+    border: "0.5px solid rgba(240,96,96,0.25)",
+  },
+  info: {
+    background: "rgba(167,139,250,0.12)",
+    color: "#c4b5fd",
+    border: "0.5px solid rgba(167,139,250,0.25)",
+  },
+};
 
 // ── Color system CSS vars applied inline ─────────────────────────────────────
 // Page base:     #0C0A14
@@ -109,6 +133,24 @@ const AMBASSADOR_TEAMS = [
   "Web Development Team",
   "Growth Analytics Team",
 ] as const;
+
+// ── Preference helpers ────────────────────────────────────────────────────────
+
+function getRankedPreferences(
+  rawData: Record<string, any> | null | undefined
+): Array<{ rank: 1 | 2 | 3; role: string }> {
+  if (!rawData) return [];
+  const result: Array<{ rank: 1 | 2 | 3; role: string }> = [];
+  const p1 = rawData._teamPreference1;
+  const p2 = rawData._teamPreference2;
+  const p3 = rawData._teamPreference3;
+  if (typeof p1 === "string" && p1.trim()) result.push({ rank: 1, role: p1.trim() });
+  if (typeof p2 === "string" && p2.trim()) result.push({ rank: 2, role: p2.trim() });
+  if (typeof p3 === "string" && p3.trim()) result.push({ rank: 3, role: p3.trim() });
+  return result;
+}
+
+const RANK_LABELS: Record<1 | 2 | 3, string> = { 1: "1st", 2: "2nd", 3: "3rd" };
 
 // ── Modal Q&A display helpers ─────────────────────────────────────────────────
 
@@ -208,6 +250,7 @@ function EmailDraftModal({
     name: app.applicant.name,
     role: app.role,
     opportunity: app.opportunity,
+    roles: app.interview_roles,
   });
 
   const [to, setTo] = useState(app.applicant.email);
@@ -416,13 +459,17 @@ function ApplicantModal({
   initialApp,
   onClose,
   onStatusChange,
+  onDeleted,
   onRefreshBoard,
+  onToast,
   boardOpportunity,
 }: {
   initialApp: Application;
   onClose: () => void;
-  onStatusChange: (id: string, status: string) => void;
+  onStatusChange: (id: string, status: string, interviewRoles?: string[]) => void;
+  onDeleted: (id: string) => void;
   onRefreshBoard: () => void;
+  onToast: (message: string, tone: ToastTone) => void;
   boardOpportunity: string;
 }) {
   const [allApps, setAllApps] = useState<Application[]>([initialApp]);
@@ -436,11 +483,16 @@ function ApplicantModal({
   const [savingNotes, setSavingNotes] = useState(false);
   const { data: modalSession } = useSession();
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [selectedInterviewRoles, setSelectedInterviewRoles] = useState<string[]>([]);
   const [changingStatus, setChangingStatus] = useState(false);
   const [emailDraftStatus, setEmailDraftStatus] = useState<string | null>(null);
   const [previousEmailStatus, setPreviousEmailStatus] = useState<string | null>(null);
   const [emailIsManual, setEmailIsManual] = useState(false);
   const [toastVisible, setToastVisible] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePhrase, setDeletePhrase] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesPanelWidth, setNotesPanelWidth] = useState(NOTES_DEFAULT_WIDTH);
   const [isDragging, setIsDragging] = useState(false);
@@ -493,6 +545,13 @@ function ApplicantModal({
     });
   }, [activeTab, allApps]);
 
+  // A typed confirmation phrase must never carry across to a different application.
+  useEffect(() => {
+    setDeleteOpen(false);
+    setDeletePhrase("");
+    setDeleteError(null);
+  }, [activeTab]);
+
   useEffect(() => {
     if (!toastVisible) return;
     const timer = setTimeout(() => setToastVisible(false), 3000);
@@ -503,16 +562,33 @@ function ApplicantModal({
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         if (emailDraftStatus) return;
-        if (pendingStatus) setPendingStatus(null);
-        else onClose();
+        if (pendingStatus) {
+          setPendingStatus(null);
+        } else if (deleteOpen) {
+          if (deleting) return;
+          setDeleteOpen(false);
+          setDeletePhrase("");
+          setDeleteError(null);
+        } else {
+          onClose();
+        }
       }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, pendingStatus, emailDraftStatus]);
+  }, [onClose, pendingStatus, emailDraftStatus, deleteOpen, deleting]);
 
   const activeApp = allApps.find((a) => a.id === activeTab) ?? initialApp;
+  // E-Board rows also carry track "Ambassador" but have no ranked preference keys,
+  // so the preference list is what actually identifies the matrix cohort.
+  const interviewRoleOptions = getRankedPreferences(activeApp.rawData);
+  const canPickInterviewRoles = activeApp.track === "Ambassador" && interviewRoleOptions.length > 0;
   const visibleFields = visibleNoteFields(activeApp);
+  // Mirrors the server's 409 guard: a Placement keys on applicant+track+season and
+  // holds no reference back to the application, so deleting an accepted one would
+  // orphan it. The UI blocks it early; the server still rejects it either way.
+  const deleteBlocked = activeApp.status === "Accepted";
+  const canConfirmDelete = !deleteBlocked && !deleting && matchesDeletePhrase(deletePhrase);
   const activeField: NoteField = visibleFields.includes(activeNotesTab) ? activeNotesTab : "application_notes";
 
   async function saveNotes() {
@@ -525,7 +601,7 @@ function ApplicantModal({
     setSavingNotes(false);
     if (handleAuthFailure(res)) return;
     if (!res.ok) {
-      window.alert("Failed to save notes. Please try again.");
+      onToast("Failed to save notes. Please try again.", "error");
     }
   }
 
@@ -534,11 +610,16 @@ function ApplicantModal({
     setChangingStatus(true);
 
     const previousStatus = activeApp.status;
+    const sendingRoles = pendingStatus === "Interviewing" && canPickInterviewRoles;
 
     const res = await fetch("/api/applications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: activeApp.id, status: pendingStatus }),
+      body: JSON.stringify({
+        id: activeApp.id,
+        status: pendingStatus,
+        ...(sendingRoles && { interview_roles: selectedInterviewRoles }),
+      }),
     });
 
     if (handleAuthFailure(res)) {
@@ -550,16 +631,21 @@ function ApplicantModal({
     if (!res.ok) {
       setChangingStatus(false);
       setPendingStatus(null);
-      window.alert("Failed to update status. Please try again.");
+      onToast("Failed to update status. Please try again.", "error");
       return;
     }
 
     const confirmedStatus = pendingStatus;
+    const confirmedRoles = selectedInterviewRoles;
 
     setAllApps((prev) =>
-      prev.map((a) => (a.id === activeApp.id ? { ...a, status: confirmedStatus } : a))
+      prev.map((a) =>
+        a.id === activeApp.id
+          ? { ...a, status: confirmedStatus, ...(sendingRoles && { interview_roles: confirmedRoles }) }
+          : a
+      )
     );
-    onStatusChange(activeApp.id, confirmedStatus);
+    onStatusChange(activeApp.id, confirmedStatus, sendingRoles ? confirmedRoles : undefined);
     setPendingStatus(null);
     setChangingStatus(false);
 
@@ -583,7 +669,7 @@ function ApplicantModal({
     });
     if (handleAuthFailure(res)) return;
     if (!res.ok) {
-      window.alert("Failed to revert status. Please try again.");
+      onToast("Failed to revert status. Please try again.", "error");
       return;
     }
     const reverted = previousEmailStatus;
@@ -593,6 +679,41 @@ function ApplicantModal({
     onStatusChange(activeApp.id, reverted);
     setEmailDraftStatus(null);
     setPreviousEmailStatus(null);
+  }
+
+  async function handleDelete() {
+    if (!canConfirmDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch("/api/applications", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: activeApp.id, confirmation: deletePhrase }),
+      });
+      if (handleAuthFailure(res)) return;
+      const data = await res.json();
+      if (!res.ok) {
+        setDeleteError(data.error ?? "Failed to delete application.");
+        return;
+      }
+      const deletedId = activeApp.id;
+      const remaining = allApps.filter((a) => a.id !== deletedId);
+      onDeleted(deletedId);
+      if (remaining.length === 0) {
+        onClose();
+        return;
+      }
+      // Keep the modal open on the applicant's next remaining application.
+      setAllApps(remaining);
+      setActiveTab(remaining[0].id);
+      setDeleteOpen(false);
+      setDeletePhrase("");
+    } catch {
+      setDeleteError("Network error. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const activeStatusColor = statusColor(activeApp.status);
@@ -691,9 +812,57 @@ function ApplicantModal({
                   status to{" "}
                   <span style={{ fontWeight: 600, color: "#EAE8F2" }}>{pendingStatus}</span>?
                 </p>
+
+                {pendingStatus === "Interviewing" && canPickInterviewRoles && (
+                  <div className="mb-5">
+                    <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
+                      Roles being considered <span style={{ textTransform: "none" }}>(optional, up to 3)</span>
+                    </p>
+                    <div className="flex gap-2 flex-wrap">
+                      {interviewRoleOptions.map((p) => {
+                        const picked = selectedInterviewRoles.includes(p.role);
+                        const atLimit = selectedInterviewRoles.length >= MAX_INTERVIEW_ROLES;
+                        const disabled = !picked && atLimit;
+                        return (
+                          <button
+                            key={p.rank}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() =>
+                              setSelectedInterviewRoles((prev) =>
+                                prev.includes(p.role)
+                                  ? prev.filter((r) => r !== p.role)
+                                  : [...prev, p.role]
+                              )
+                            }
+                            className="transition-colors disabled:cursor-not-allowed"
+                            style={{
+                              fontSize: 11,
+                              padding: "5px 10px",
+                              borderRadius: 999,
+                              cursor: disabled ? "not-allowed" : "pointer",
+                              opacity: disabled ? 0.35 : 1,
+                              background: picked ? "rgba(167,139,250,0.16)" : "transparent",
+                              border: picked
+                                ? "0.5px solid rgba(167,139,250,0.45)"
+                                : "0.5px solid rgba(139,130,190,0.12)",
+                              color: picked ? "#a78bfa" : "#A09BB5",
+                            }}
+                          >
+                            {RANK_LABELS[p.rank]}: {p.role}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex gap-2 justify-end">
                   <button
-                    onClick={() => setPendingStatus(null)}
+                    onClick={() => {
+                      setSelectedInterviewRoles([]);
+                      setPendingStatus(null);
+                    }}
                     className="px-4 py-1.5 rounded-[8px] transition-colors"
                     style={{ fontSize: 12, border: "0.5px solid rgba(139,130,190,0.12)", color: "#A09BB5", background: "transparent" }}
                   >
@@ -784,6 +953,62 @@ function ApplicantModal({
               </button>
             </div>
           </div>
+
+          {/* Preference chip row — Ambassador matrix applications only */}
+          {activeApp.track === "Ambassador" && getRankedPreferences(activeApp.rawData).length > 0 && (
+            <div
+              className="flex items-center gap-2 px-6 shrink-0 flex-wrap"
+              style={{ paddingTop: 10, paddingBottom: 10, borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 500, color: "#6A6580", letterSpacing: "0.3px", whiteSpace: "nowrap" }}>
+                Preferences
+              </span>
+              {getRankedPreferences(activeApp.rawData).map((p) => (
+                <span
+                  key={p.rank}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: "#8B7FEE",
+                    background: "rgba(139,127,238,0.15)",
+                    borderRadius: 6,
+                    padding: "3px 8px",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {RANK_LABELS[p.rank]}: {p.role}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Roles chosen at the Interviewing step */}
+          {activeApp.status === "Interviewing" && activeApp.interview_roles.length > 0 && (
+            <div
+              className="flex items-center gap-2 px-6 shrink-0 flex-wrap"
+              style={{ paddingTop: 10, paddingBottom: 10, borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 500, color: "#6A6580", letterSpacing: "0.3px", whiteSpace: "nowrap" }}>
+                Interviewing for
+              </span>
+              {activeApp.interview_roles.map((role) => (
+                <span
+                  key={role}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: "#a78bfa",
+                    background: "rgba(167,139,250,0.16)",
+                    borderRadius: 6,
+                    padding: "3px 8px",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {role}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Role / opportunity tabs */}
           <div
@@ -907,7 +1132,10 @@ function ApplicantModal({
                   {ACTION_STATUSES.filter((s) => s !== activeApp.status).map((s) => (
                     <button
                       key={s}
-                      onClick={() => setPendingStatus(s)}
+                      onClick={() => {
+                        setSelectedInterviewRoles([]);
+                        setPendingStatus(s);
+                      }}
                       style={statusButtonBase}
                       onMouseEnter={(e) => {
                         (e.currentTarget as HTMLButtonElement).style.borderColor = "#6B5FCC";
@@ -980,6 +1208,128 @@ function ApplicantModal({
                   </div>
                 );
               })()}
+
+              {/* Danger Zone */}
+              <div
+                style={{
+                  borderTop: "0.5px solid rgba(240,96,96,0.16)",
+                  paddingTop: 16,
+                  marginTop: 4,
+                }}
+              >
+                <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#F06060" }}>
+                  Danger Zone
+                </p>
+
+                {!deleteOpen ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        setDeleteError(null);
+                        setDeletePhrase("");
+                        setDeleteOpen(true);
+                      }}
+                      disabled={deleteBlocked}
+                      style={{
+                        ...statusButtonBase,
+                        color: deleteBlocked ? "#6A6580" : "#F06060",
+                        borderColor: deleteBlocked
+                          ? "rgba(139,130,190,0.12)"
+                          : "rgba(240,96,96,0.28)",
+                        cursor: deleteBlocked ? "not-allowed" : "pointer",
+                        opacity: deleteBlocked ? 0.5 : 1,
+                      }}
+                      onMouseEnter={(e) => {
+                        if (deleteBlocked) return;
+                        (e.currentTarget as HTMLButtonElement).style.background = "rgba(240,96,96,0.10)";
+                        (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(240,96,96,0.5)";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (deleteBlocked) return;
+                        (e.currentTarget as HTMLButtonElement).style.background = "#1C1930";
+                        (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(240,96,96,0.28)";
+                      }}
+                    >
+                      Delete application
+                    </button>
+                    <p className="mt-2" style={{ fontSize: 11, color: "#6A6580", lineHeight: 1.5 }}>
+                      {deleteBlocked
+                        ? "Accepted applications cannot be deleted because a placement record may depend on them."
+                        : "Permanently deletes this one application. The applicant and their other applications are not affected."}
+                    </p>
+                  </>
+                ) : (
+                  <div
+                    style={{
+                      background: "rgba(240,96,96,0.05)",
+                      border: "0.5px solid rgba(240,96,96,0.22)",
+                      borderRadius: 8,
+                      padding: 14,
+                    }}
+                  >
+                    <p style={{ fontSize: 12.5, color: "#EAE8F2", lineHeight: 1.6 }}>
+                      Delete <strong>{activeApp.applicant.name}</strong>&rsquo;s application for{" "}
+                      <strong>{activeApp.role}</strong>?
+                    </p>
+                    <p className="mt-1" style={{ fontSize: 11, color: "#A09BB5", lineHeight: 1.5 }}>
+                      This cannot be undone. Notes, interview roles, and email history for this
+                      application are removed with it.
+                    </p>
+
+                    <p className="mt-3 mb-1.5" style={{ fontSize: 11, color: "#A09BB5" }}>
+                      Type <span style={{ color: "#F06060" }}>{DELETE_APPLICATION_PHRASE}</span> to confirm
+                    </p>
+                    <input
+                      type="text"
+                      value={deletePhrase}
+                      onChange={(e) => setDeletePhrase(e.target.value)}
+                      placeholder={DELETE_APPLICATION_PHRASE}
+                      autoFocus
+                      disabled={deleting}
+                      className={modalInputCls}
+                      style={{ ...modalInputStyle, fontSize: 12.5 }}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = "#F06060"; }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(139,130,190,0.12)"; }}
+                    />
+
+                    {deleteError && (
+                      <p className="mt-2" style={{ fontSize: 11.5, color: "#F06060", lineHeight: 1.5 }}>
+                        {deleteError}
+                      </p>
+                    )}
+
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => {
+                          setDeleteOpen(false);
+                          setDeletePhrase("");
+                          setDeleteError(null);
+                        }}
+                        disabled={deleting}
+                        style={{ ...statusButtonBase, cursor: deleting ? "not-allowed" : "pointer" }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDelete}
+                        disabled={!canConfirmDelete}
+                        style={{
+                          ...statusButtonBase,
+                          background: canConfirmDelete ? "rgba(240,96,96,0.14)" : "#1C1930",
+                          borderColor: canConfirmDelete
+                            ? "rgba(240,96,96,0.45)"
+                            : "rgba(139,130,190,0.12)",
+                          color: canConfirmDelete ? "#F06060" : "#6A6580",
+                          cursor: canConfirmDelete ? "pointer" : "not-allowed",
+                          opacity: canConfirmDelete ? 1 : 0.5,
+                        }}
+                      >
+                        {deleting ? "Deleting…" : "Delete application"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* RIGHT: Side notes panel */}
@@ -1144,16 +1494,25 @@ function ApplicantCard({
   isSelected,
   anySelected,
   onToggleSelect,
+  isDragging,
+  onDragStart,
+  onDragEnd,
 }: {
   app: Application;
   onOpen: (app: Application) => void;
   isSelected: boolean;
   anySelected: boolean;
   onToggleSelect: (id: string) => void;
+  isDragging: boolean;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
 }) {
   const emailSent = !!(EMAIL_STATUSES as readonly string[]).includes(app.status) && !!statusToSentAt(app.status, app);
   const showSentBadge = emailSent;
-  const showPrefers = app.track === "Ambassador" && !!app.rawData?._teamPreference1;
+  const emailPending = (EMAIL_STATUSES as readonly string[]).includes(app.status) && !statusToSentAt(app.status, app);
+  const rankedPrefs = getRankedPreferences(app.rawData);
+  const showPrefers = app.track === "Ambassador" && rankedPrefs.length > 0;
+  const showInterviewingFor = app.status === "Interviewing" && app.interview_roles.length > 0;
 
   function handleCardClick(e: React.MouseEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -1173,16 +1532,28 @@ function ApplicantCard({
     : "1px solid rgba(255,255,255,0.06)";
   const cardOpacity = anySelected && !isSelected ? 0.45 : 1;
 
+  // Accepting creates a Placement keyed on applicant+track+season with no reference
+  // back to the application, and closes sibling applications. Dragging out of
+  // Accepted would orphan that placement, so Accepted cards never move by drag.
+  const canDrag = !anySelected && app.status !== "Accepted";
+
   return (
     <div
       className="rcc-card relative cursor-pointer select-none group"
+      draggable={canDrag}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", app.id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart(app.id);
+      }}
+      onDragEnd={onDragEnd}
       style={{
         padding: "13px 15px",
         borderRadius: 12,
         background: isSelected ? "rgba(167,139,250,0.08)" : "#15141e",
         border: cardBorder,
         transition: "transform 0.16s ease, border-color 0.16s, background 0.16s, box-shadow 0.16s, opacity 0.16s",
-        opacity: cardOpacity,
+        opacity: isDragging ? 0.4 : cardOpacity,
       }}
       onClick={handleCardClick}
     >
@@ -1190,6 +1561,9 @@ function ApplicantCard({
       <div
         className={`absolute top-2 left-2 z-10 ${anySelected ? "flex" : "hidden group-hover:flex"}`}
         onClick={handleCheckboxClick}
+        // Cancelling dragstart here stops a drag begun on the checkbox from dragging
+        // the card. draggable={false} on a child is not reliable across browsers.
+        onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
         style={{ alignItems: "center", justifyContent: "center" }}
       >
         <input
@@ -1234,18 +1608,29 @@ function ApplicantCard({
           >
             {app.applicant.name}
           </div>
-          <div
-            className="truncate"
-            style={{ fontSize: 12.5, color: "#9a98ab", fontWeight: 500 }}
-          >
-            {app.role}
-          </div>
+          {/* Matrix imports set role to the 1st preference, so the Prefers line already shows it. */}
+          {!showPrefers && (
+            <div
+              className="truncate"
+              style={{ fontSize: 12.5, color: "#9a98ab", fontWeight: 500 }}
+            >
+              {app.role}
+            </div>
+          )}
           {showPrefers && (
             <div
               className="truncate"
               style={{ fontSize: 11.5, color: "#6c6a7d", fontWeight: 500, marginTop: 1 }}
             >
-              Prefers: {app.rawData?._teamPreference1}
+              {`Prefers: ${rankedPrefs.map((p) => `${p.rank}) ${p.role}`).join(" · ")}`}
+            </div>
+          )}
+          {showInterviewingFor && (
+            <div
+              className="truncate"
+              style={{ fontSize: 11.5, color: "#a78bfa", fontWeight: 500, marginTop: 2 }}
+            >
+              {`Interviewing for: ${app.interview_roles.join(", ")}`}
             </div>
           )}
         </div>
@@ -1271,6 +1656,24 @@ function ApplicantCard({
             </span>
           </div>
         )}
+
+        {/* Email pending pill */}
+        {emailPending && (
+          <div
+            className="shrink-0"
+            style={{
+              padding: "3px 8px",
+              borderRadius: 999,
+              background: "rgba(240,176,64,0.10)",
+              border: "0.5px solid rgba(240,176,64,0.25)",
+              fontSize: 11,
+              fontWeight: 500,
+              color: "#F0B040",
+            }}
+          >
+            Email pending
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1285,6 +1688,10 @@ function Column({
   selectedIds,
   onToggleSelect,
   onToggleAll,
+  draggingId,
+  onCardDrop,
+  onCardDragStart,
+  onCardDragEnd,
 }: {
   status: Status;
   apps: Application[];
@@ -1292,7 +1699,25 @@ function Column({
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onToggleAll: (ids: string[]) => void;
+  draggingId: string | null;
+  onCardDrop: (id: string, status: Status) => void;
+  onCardDragStart: (id: string) => void;
+  onCardDragEnd: () => void;
 }) {
+  const [isDragOver, setIsDragOver] = useState(false);
+  // dragenter/dragleave also fire when crossing child elements, so depth-count
+  // them rather than clearing the highlight on the first dragleave.
+  const dragDepth = useRef(0);
+  // Accepted runs placement logic, so it is never a drop target.
+  const canDrop = draggingId !== null && status !== "Accepted";
+
+  useEffect(() => {
+    if (draggingId !== null) return;
+    dragDepth.current = 0;
+    setIsDragOver(false);
+  }, [draggingId]);
+
+  const showDropTarget = canDrop && isDragOver;
   const barColor = columnBarColor(status);
   const columnIds = apps.map((a) => a.id);
   const selectedInColumn = columnIds.filter((id) => selectedIds.has(id));
@@ -1377,7 +1802,47 @@ function Column({
       {/* Card list */}
       <div
         className="flex-1 overflow-y-auto flex flex-col"
-        style={{ padding: "2px 14px 18px 18px", gap: 10 }}
+        style={{
+          padding: "2px 14px 18px 18px",
+          gap: 10,
+          borderRadius: 12,
+          background: showDropTarget ? `${barColor}14` : "transparent",
+          outline: showDropTarget ? `1.5px dashed ${barColor}` : "none",
+          outlineOffset: -6,
+          transition: "background 0.15s",
+        }}
+        onDragOver={(e) => {
+          if (!canDrop) return;
+          // Only calling preventDefault on droppable columns is what makes the
+          // browser show the "no drop" cursor over Accepted.
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+        }}
+        onDragEnter={() => {
+          if (!canDrop) return;
+          dragDepth.current += 1;
+          setIsDragOver(true);
+        }}
+        onDragLeave={() => {
+          if (!canDrop) return;
+          dragDepth.current -= 1;
+          if (dragDepth.current <= 0) {
+            dragDepth.current = 0;
+            setIsDragOver(false);
+          }
+        }}
+        onDrop={(e) => {
+          if (!canDrop) return;
+          e.preventDefault();
+          dragDepth.current = 0;
+          setIsDragOver(false);
+          // The optimistic move unmounts the source card before the browser can
+          // fire dragend on it, so that handler cannot be relied on to clear the
+          // drag state after a cross-column drop. Clear it here instead.
+          onCardDragEnd();
+          const id = e.dataTransfer.getData("text/plain");
+          if (id) onCardDrop(id, status);
+        }}
       >
         {apps.map((app) => (
           <ApplicantCard
@@ -1387,6 +1852,9 @@ function Column({
             isSelected={selectedIds.has(app.id)}
             anySelected={anySelected}
             onToggleSelect={onToggleSelect}
+            isDragging={draggingId === app.id}
+            onDragStart={onCardDragStart}
+            onDragEnd={onCardDragEnd}
           />
         ))}
         {apps.length === 0 && (
@@ -1396,7 +1864,10 @@ function Column({
               marginTop: 8,
               padding: "30px 16px",
               borderRadius: 12,
-              border: "1.5px dashed rgba(255,255,255,0.08)",
+              border: showDropTarget
+                ? `1.5px dashed ${barColor}`
+                : "1.5px dashed rgba(255,255,255,0.08)",
+              transition: "border-color 0.15s",
             }}
           >
             <span style={{ fontSize: 12.5, color: "#565465", fontWeight: 500 }}>No applicants</span>
@@ -1632,7 +2103,21 @@ export default function AdminPage() {
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
   const [isBulkSending, setIsBulkSending] = useState(false);
   const [showBulkEmailDialog, setShowBulkEmailDialog] = useState(false);
-  const [bulkToastMessage, setBulkToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+
+  // Always a fresh object, so repeated identical messages still restart the timer.
+  const showToast = useCallback((message: string, tone: ToastTone = "info") => {
+    setToast({ message, tone });
+  }, []);
+
+  // Single owner of the dismiss timer — the cleanup is what stops an earlier
+  // toast's timer from cutting a later one short.
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), toast.tone === "error" ? 4000 : 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const { data: session } = useSession();
   const sessionName = session?.user?.name ?? "User";
@@ -1759,11 +2244,75 @@ export default function AdminPage() {
     fetchApps();
   }, [fetchOpportunities, fetchApps, selectedOpportunity]);
 
-  const handleStatusChange = useCallback((id: string, newStatus: string) => {
-    setApplications((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
-    );
-  }, []);
+  const handleStatusChange = useCallback(
+    (id: string, newStatus: string, interviewRoles?: string[]) => {
+      setApplications((prev) =>
+        prev.map((a) =>
+          a.id === id
+            ? { ...a, status: newStatus, ...(interviewRoles !== undefined && { interview_roles: interviewRoles }) }
+            : a
+        )
+      );
+    },
+    []
+  );
+
+  const handleCardDrop = useCallback(
+    async (id: string, newStatus: Status) => {
+      // Cleared before every early return below so no path can leave a card
+      // stuck at drag opacity.
+      setDraggingId(null);
+      const app = applications.find((a) => a.id === id);
+      if (!app) return;
+      if (app.status === newStatus) return;
+      // Accepted triggers placement logic and closes sibling applications, so it
+      // stays behind the modal's confirmation flow. The column also refuses drops.
+      if (newStatus === "Accepted") return;
+
+      const previousStatus = app.status;
+      setApplications((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
+      );
+
+      function revert() {
+        setApplications((prev) =>
+          prev.map((a) => (a.id === id ? { ...a, status: previousStatus } : a))
+        );
+        showToast("Failed to move applicant. Please try again.", "error");
+      }
+
+      try {
+        const res = await fetch("/api/applications", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, status: newStatus }),
+        });
+        if (handleAuthFailure(res)) return;
+        if (!res.ok) {
+          revert();
+          return;
+        }
+        showToast(`Moved to ${newStatus}`, "success");
+      } catch {
+        revert();
+      }
+    },
+    [applications, showToast]
+  );
+
+  const handleCardDragStart = useCallback((id: string) => setDraggingId(id), []);
+  const handleCardDragEnd = useCallback(() => setDraggingId(null), []);
+
+  const handleDeleted = useCallback((id: string) => {
+    setApplications((prev) => prev.filter((a) => a.id !== id));
+    setSelectedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    showToast("Application deleted", "success");
+  }, [showToast]);
 
   const handleBulkStatus = useCallback(
     async (status: "Interviewing" | "Rejected") => {
@@ -1800,8 +2349,7 @@ export default function AdminPage() {
               return orig !== undefined ? { ...a, status: orig } : a;
             })
           );
-          setBulkToastMessage("Bulk update failed. Please try again.");
-          setTimeout(() => setBulkToastMessage(null), 3000);
+          showToast("Bulk update failed. Please try again.", "error");
           return;
         }
 
@@ -1836,8 +2384,7 @@ export default function AdminPage() {
           failedCount === 0
             ? `${movedCount} moved to ${status}`
             : `${movedCount} moved, ${failedCount} failed`;
-        setBulkToastMessage(msg);
-        setTimeout(() => setBulkToastMessage(null), 3000);
+        showToast(msg, failedCount === 0 ? "success" : "error");
       } catch {
         // Network error — revert all
         setApplications((prev) =>
@@ -1846,13 +2393,12 @@ export default function AdminPage() {
             return orig !== undefined ? { ...a, status: orig } : a;
           })
         );
-        setBulkToastMessage("Bulk update failed. Please try again.");
-        setTimeout(() => setBulkToastMessage(null), 3000);
+        showToast("Bulk update failed. Please try again.", "error");
       } finally {
         setIsBulkUpdating(false);
       }
     },
-    [selectedIds, applications]
+    [selectedIds, applications, showToast]
   );
 
   const handleBulkEmail = useCallback(
@@ -1873,8 +2419,7 @@ export default function AdminPage() {
 
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          setBulkToastMessage(data.error ?? "Bulk email failed. Please try again.");
-          setTimeout(() => setBulkToastMessage(null), 4000);
+          showToast(data.error ?? "Bulk email failed. Please try again.", "error");
           return;
         }
 
@@ -1904,16 +2449,14 @@ export default function AdminPage() {
         if (sent.length > 0) parts.push(`${sent.length} sent`);
         if (skipped.length > 0) parts.push(`${skipped.length} skipped`);
         if (failed.length > 0) parts.push(`${failed.length} failed`);
-        setBulkToastMessage(parts.join(" • "));
-        setTimeout(() => setBulkToastMessage(null), 4000);
+        showToast(parts.join(" • "), failed.length === 0 ? "success" : "error");
       } catch {
-        setBulkToastMessage("Bulk email failed. Please try again.");
-        setTimeout(() => setBulkToastMessage(null), 4000);
+        showToast("Bulk email failed. Please try again.", "error");
       } finally {
         setIsBulkSending(false);
       }
     },
-    [selectedIds, fetchApps]
+    [selectedIds, fetchApps, showToast]
   );
 
   async function handleRenameSubmit() {
@@ -2442,6 +2985,10 @@ export default function AdminPage() {
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
                 onToggleAll={toggleSelectAll}
+                draggingId={draggingId}
+                onCardDrop={handleCardDrop}
+                onCardDragStart={handleCardDragStart}
+                onCardDragEnd={handleCardDragEnd}
               />
             ))}
           </div>
@@ -2454,7 +3001,9 @@ export default function AdminPage() {
           initialApp={selectedApp}
           onClose={() => setSelectedApp(null)}
           onStatusChange={handleStatusChange}
+          onDeleted={handleDeleted}
           onRefreshBoard={fetchApps}
+          onToast={showToast}
           boardOpportunity={selectedOpportunity}
         />
       )}
@@ -2474,17 +3023,12 @@ export default function AdminPage() {
       )}
 
       {/* Bulk action toast */}
-      {bulkToastMessage && (
+      {toast && (
         <div
           className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] text-sm font-medium px-5 py-2.5 shadow-lg"
-          style={{
-            background: "rgba(167,139,250,0.12)",
-            color: "#c4b5fd",
-            borderRadius: 8,
-            border: "0.5px solid rgba(167,139,250,0.25)",
-          }}
+          style={{ ...TOAST_TONE_STYLE[toast.tone], borderRadius: 8 }}
         >
-          {bulkToastMessage}
+          {toast.message}
         </div>
       )}
     </main>

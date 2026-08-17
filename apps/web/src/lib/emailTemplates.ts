@@ -1,7 +1,10 @@
+import { formatRoleList } from "./interviewRoles";
+
 type TemplateData = {
   name: string;
   role: string;
   opportunity: string;
+  roles?: string[];
 };
 
 type EmailTemplate = {
@@ -9,11 +12,19 @@ type EmailTemplate = {
   body: string;
 };
 
-function fill(template: string, data: TemplateData): string {
+type FilledData = {
+  name: string;
+  role: string;
+  opportunity: string;
+  roles: string;
+};
+
+function fill(template: string, data: FilledData): string {
   return template
     .replace(/\{\{name\}\}/g, data.name)
     .replace(/\{\{role\}\}/g, data.role)
-    .replace(/\{\{opportunity\}\}/g, data.opportunity);
+    .replace(/\{\{opportunity\}\}/g, data.opportunity)
+    .replace(/\{\{roles\}\}/g, data.roles);
 }
 
 const TEMPLATES: Record<string, { subject: string; body: string }> = {
@@ -54,13 +65,36 @@ RCC Recruiting Team`,
   },
 };
 
+// Used instead of the standard Interviewing body when the reviewer selected
+// specific roles. {{roles}} appears only here, so it can never reach a caller
+// that asks for an unfilled template.
+const INTERVIEWING_BODY_WITH_ROLES = `Hi {{name}},
+
+Thank you for your interest in RCC's {{opportunity}}. We were impressed by your application and would like to invite you to interview for {{roles}}.
+
+We'll follow up shortly with scheduling details. In the meantime, please don't hesitate to reach out if you have any questions.
+
+Best,
+RCC Recruiting Team`;
+
 export function getEmailTemplate(status: string, data: TemplateData): EmailTemplate {
   const template = TEMPLATES[status];
   if (!template) {
     throw new Error(`No email template for status: "${status}"`);
   }
+
+  const selected = (data.roles ?? []).map((r) => r.trim()).filter(Boolean);
+  const useRoles = status === "Interviewing" && selected.length > 0;
+
+  const filled: FilledData = {
+    name: data.name,
+    role: useRoles ? selected[0] : data.role,
+    opportunity: data.opportunity,
+    roles: formatRoleList(selected),
+  };
+
   return {
-    subject: fill(template.subject, data),
-    body: fill(template.body, data),
+    subject: fill(template.subject, filled),
+    body: fill(useRoles ? INTERVIEWING_BODY_WITH_ROLES : template.body, filled),
   };
 }
