@@ -12,6 +12,10 @@ import {
 } from "@/lib/emailService";
 import { getEmailTemplate } from "@/lib/emailTemplates";
 
+export const maxDuration = 60; // Vercel Hobby ceiling
+
+const MAX_BATCH = 10;
+
 // Small fill helper — mirrors emailTemplates.ts's internal fill() without
 // modifying that file. Used to apply per-recipient placeholders to override text.
 function fill(template: string, data: { name: string; role: string; opportunity: string }): string {
@@ -42,9 +46,14 @@ export async function POST(request: Request) {
   if (!Array.isArray(payload.ids) || payload.ids.length === 0) {
     return NextResponse.json({ error: "ids must be a non-empty array." }, { status: 400 });
   }
-  if (payload.ids.length > 50) {
+  if (payload.ids.length > MAX_BATCH) {
     return NextResponse.json(
-      { error: "ids exceeds maximum batch size of 50." },
+      {
+        error:
+          `Batch too large: ${payload.ids.length} recipients requested, ` +
+          `max ${MAX_BATCH} per call. Split into smaller batches.`,
+        maxBatch: MAX_BATCH,
+      },
       { status: 400 }
     );
   }
