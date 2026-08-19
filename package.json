@@ -15,6 +15,7 @@
   },
   "type": "module",
   "scripts": {
+    "postinstall": "bun run --filter @application-tracking-system/db db:generate",
     "dev": "bun run --filter '*' dev",
     "build": "bun run --filter '*' build",
     "check-types": "bun run --filter '*' check-types",
