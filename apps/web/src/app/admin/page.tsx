@@ -550,6 +550,13 @@ function ApplicantModal({
   const [notesPanelWidth, setNotesPanelWidth] = useState(NOTES_DEFAULT_WIDTH);
   const [isDragging, setIsDragging] = useState(false);
   const [handleHover, setHandleHover] = useState(false);
+  // In-place edit of interview_roles from the "Interviewing for" chip row.
+  // Draft mirrors the row's current roles until Save; Save is blocked when the
+  // draft is empty because the chip row (and this Edit affordance) is gated on
+  // interview_roles.length > 0.
+  const [editingRoles, setEditingRoles] = useState(false);
+  const [roleDraft, setRoleDraft] = useState<string[]>([]);
+  const [savingRoles, setSavingRoles] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
@@ -596,6 +603,9 @@ function ApplicantModal({
       interview_notes:   app.interview_notes   ?? "",
       decision_notes:    app.decision_notes    ?? "",
     });
+    // A draft roles-edit must not carry across to a different application.
+    setEditingRoles(false);
+    setRoleDraft([]);
   }, [activeTab, allApps]);
 
   // A typed confirmation phrase must never carry across to a different application.
@@ -617,6 +627,10 @@ function ApplicantModal({
         if (emailDraftStatus) return;
         if (pendingStatus) {
           setPendingStatus(null);
+        } else if (editingRoles) {
+          if (savingRoles) return;
+          setEditingRoles(false);
+          setRoleDraft([]);
         } else if (deleteOpen) {
           if (deleting) return;
           setDeleteOpen(false);
@@ -629,7 +643,7 @@ function ApplicantModal({
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, pendingStatus, emailDraftStatus, deleteOpen, deleting]);
+  }, [onClose, pendingStatus, emailDraftStatus, deleteOpen, deleting, editingRoles, savingRoles]);
 
   const activeApp = allApps.find((a) => a.id === activeTab) ?? initialApp;
   // E-Board rows also carry track "Ambassador" but have no ranked preference keys,
@@ -655,6 +669,35 @@ function ApplicantModal({
     if (handleAuthFailure(res)) return;
     if (!res.ok) {
       onToast("Failed to save notes. Please try again.", "error");
+    }
+  }
+
+  async function saveRoles() {
+    if (roleDraft.length === 0) return;
+    setSavingRoles(true);
+    try {
+      const res = await fetch("/api/applications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: activeApp.id, interview_roles: roleDraft }),
+      });
+      if (handleAuthFailure(res)) return;
+      if (!res.ok) {
+        onToast("Failed to update interview roles. Please try again.", "error");
+        return;
+      }
+      const savedId = activeApp.id;
+      const savedRoles = roleDraft;
+      setAllApps((prev) =>
+        prev.map((a) => (a.id === savedId ? { ...a, interview_roles: savedRoles } : a))
+      );
+      onStatusChange(savedId, activeApp.status, savedRoles);
+      setEditingRoles(false);
+      setRoleDraft([]);
+    } catch {
+      onToast("Failed to update interview roles. Please try again.", "error");
+    } finally {
+      setSavingRoles(false);
     }
   }
 
@@ -1013,7 +1056,7 @@ function ApplicantModal({
               <span style={{ fontSize: 11, fontWeight: 500, color: "#6A6580", letterSpacing: "0.3px", whiteSpace: "nowrap" }}>
                 Interviewing for
               </span>
-              {activeApp.interview_roles.map((role) => (
+              {!editingRoles && activeApp.interview_roles.map((role) => (
                 <span
                   key={role}
                   style={{
@@ -1029,6 +1072,93 @@ function ApplicantModal({
                   {role}
                 </span>
               ))}
+
+              {!editingRoles && canPickInterviewRoles && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRoleDraft(activeApp.interview_roles);
+                    setEditingRoles(true);
+                  }}
+                  title="Edit interview roles"
+                  className="transition-colors"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: "#A09BB5",
+                    background: "transparent",
+                    border: "0.5px solid rgba(139,130,190,0.18)",
+                    borderRadius: 6,
+                    padding: "3px 8px",
+                    cursor: "pointer",
+                    marginLeft: 4,
+                    whiteSpace: "nowrap",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = "#6B5FCC";
+                    (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(139,130,190,0.18)";
+                    (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5";
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+
+              {editingRoles && (
+                <>
+                  <div className="w-full" style={{ marginTop: 4 }}>
+                    <InterviewRolePicker
+                      options={interviewRoleOptions}
+                      selected={roleDraft}
+                      onChange={setRoleDraft}
+                    />
+                  </div>
+                  <div className="w-full flex gap-2 justify-end" style={{ marginTop: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (savingRoles) return;
+                        setEditingRoles(false);
+                        setRoleDraft([]);
+                      }}
+                      disabled={savingRoles}
+                      className="transition-colors disabled:opacity-50"
+                      style={{
+                        fontSize: 11,
+                        color: "#A09BB5",
+                        background: "transparent",
+                        border: "0.5px solid rgba(139,130,190,0.18)",
+                        borderRadius: 6,
+                        padding: "4px 10px",
+                        cursor: savingRoles ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveRoles}
+                      disabled={savingRoles || roleDraft.length === 0}
+                      title={roleDraft.length === 0 ? "Select at least one role" : undefined}
+                      className="transition-colors disabled:opacity-50"
+                      style={{
+                        fontSize: 11,
+                        color: "#EAE8F2",
+                        background: "#6B5FCC",
+                        border: "0.5px solid rgba(167,139,250,0.35)",
+                        borderRadius: 6,
+                        padding: "4px 10px",
+                        cursor: savingRoles || roleDraft.length === 0 ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {savingRoles ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
