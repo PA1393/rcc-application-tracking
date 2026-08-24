@@ -2066,7 +2066,7 @@ function BulkInterviewEmailDialog({
   onClose,
 }: {
   selectedApps: Application[];
-  onSend: (subject: string, body: string) => void;
+  onSend: (subject: string | null, body: string | null) => void;
   onClose: () => void;
 }) {
   // Compute default subject/body from template (first app for preview)
@@ -2101,8 +2101,24 @@ function BulkInterviewEmailDialog({
   const previewSubject = fillTemplate(subject, previewData);
   const previewBody = fillTemplate(body, previewData);
 
+  // When the reviewer hasn't edited either field, we omit both overrides and
+  // let the server pick the per-recipient template branch (roles vs single).
+  const isPristine =
+    subject === rawTemplate.subject && body === rawTemplate.body;
+
+  // If the message references {{roles}}, any recipient without interview_roles
+  // would render a broken sentence. Preemptively block the send here; the
+  // server enforces the same rule.
+  const usesRolesPlaceholder =
+    subject.includes("{{roles}}") || body.includes("{{roles}}");
+  const missingRoles = selectedApps.filter(
+    (a) => (a.interview_roles?.length ?? 0) === 0
+  );
+  const rolesGuardFail =
+    !isPristine && usesRolesPlaceholder && missingRoles.length > 0;
+
   const rateLimitWarning = sendable > 10;
-  const canSend = sendable > 0 && !rateLimitWarning;
+  const canSend = sendable > 0 && !rateLimitWarning && !rolesGuardFail;
 
   return (
     <div
@@ -2172,9 +2188,31 @@ function BulkInterviewEmailDialog({
             <p style={{ fontSize: 11.5, color: "#6A6580", marginTop: 4 }}>
               Placeholders <code style={{ color: "#9a98ab" }}>{"{{name}}"}</code>,{" "}
               <code style={{ color: "#9a98ab" }}>{"{{role}}"}</code>,{" "}
-              <code style={{ color: "#9a98ab" }}>{"{{opportunity}}"}</code> are filled per recipient.
+              <code style={{ color: "#9a98ab" }}>{"{{opportunity}}"}</code>,{" "}
+              <code style={{ color: "#9a98ab" }}>{"{{roles}}"}</code> are filled per recipient.
             </p>
           </div>
+
+          {/* Missing-roles guard: message uses {{roles}} but some recipients have none */}
+          {rolesGuardFail && (
+            <div
+              className="px-4 py-3"
+              style={{ background: "rgba(240,96,96,0.08)", borderLeft: "3px solid #F06060", borderRadius: 6 }}
+            >
+              <p style={{ fontSize: 13, color: "#F06060", marginBottom: 4 }}>
+                Cannot send: the message uses <code>{"{{roles}}"}</code> but{" "}
+                {missingRoles.length} recipient{missingRoles.length === 1 ? "" : "s"}{" "}
+                {missingRoles.length === 1 ? "has" : "have"} no interview roles set.
+              </p>
+              <p style={{ fontSize: 12, color: "#A09BB5" }}>
+                {missingRoles.slice(0, 5).map((a) => a.applicant.name).join(", ")}
+                {missingRoles.length > 5 ? `, and ${missingRoles.length - 5} more` : ""}.
+              </p>
+              <p style={{ fontSize: 12, color: "#6A6580", marginTop: 4 }}>
+                Set interview roles for those applicants, or remove <code>{"{{roles}}"}</code> from the message.
+              </p>
+            </div>
+          )}
 
           {/* Preview */}
           {firstApp && (
@@ -2214,7 +2252,10 @@ function BulkInterviewEmailDialog({
             Cancel
           </button>
           <button
-            onClick={() => canSend && onSend(subject, body)}
+            onClick={() => {
+              if (!canSend) return;
+              onSend(isPristine ? null : subject, isPristine ? null : body);
+            }}
             disabled={!canSend}
             style={{
               fontSize: 13,
@@ -2691,24 +2732,40 @@ export default function AdminPage() {
   );
 
   const handleBulkEmail = useCallback(
-    async (subject: string, body: string) => {
+    async (subject: string | null, body: string | null) => {
       const ids = [...selectedIds];
       if (ids.length === 0) return;
 
       setIsBulkSending(true);
       setShowBulkEmailDialog(false);
       try {
+        // Pristine dialog sends omit subject/body so the server picks the
+        // per-recipient template branch (roles vs single) via getEmailTemplate.
+        const payload: { ids: string[]; subject?: string; body?: string } = { ids };
+        if (subject !== null) payload.subject = subject;
+        if (body !== null) payload.body = body;
+
         const res = await fetch("/api/applications/bulk-email", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids, subject, body }),
+          body: JSON.stringify(payload),
         });
 
         if (handleAuthFailure(res)) return;
 
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          showToast(data.error ?? "Bulk email failed. Please try again.", "error");
+          const names = Array.isArray(data.missingRoleNames)
+            ? (data.missingRoleNames as string[])
+            : [];
+          const suffix =
+            names.length > 0
+              ? ` (${names.slice(0, 3).join(", ")}${names.length > 3 ? `, +${names.length - 3} more` : ""})`
+              : "";
+          showToast(
+            (data.error ?? "Bulk email failed. Please try again.") + suffix,
+            "error"
+          );
           return;
         }
 
