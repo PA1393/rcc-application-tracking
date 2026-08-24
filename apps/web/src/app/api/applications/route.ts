@@ -87,6 +87,44 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
     normalizedRoles = result.value;
+
+    // Guardrail: interview roles must be Ambassador-track and must match the
+    // applicant's own ranked preferences. The UI already constrains this, but
+    // a hand-crafted request could still submit any string. Skipped for the
+    // empty case (clearing roles is always allowed).
+    if (normalizedRoles.length > 0) {
+      const row = await prisma.application.findUnique({
+        where: { id },
+        select: { track: true, rawData: true },
+      });
+      if (!row) {
+        return NextResponse.json({ error: "Application not found." }, { status: 404 });
+      }
+      if (row.track !== "Ambassador") {
+        return NextResponse.json(
+          { error: "Interview roles are only supported for Ambassador applications." },
+          { status: 400 }
+        );
+      }
+      const rawData = (row.rawData ?? {}) as Record<string, unknown>;
+      const allowed = new Set(
+        [rawData._teamPreference1, rawData._teamPreference2, rawData._teamPreference3]
+          .filter((r): r is string => typeof r === "string" && r.trim().length > 0)
+          .map((r) => r.trim())
+      );
+      const invalid = normalizedRoles.filter((r) => !allowed.has(r));
+      if (invalid.length > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Interview roles must be among the applicant's recorded preferences.",
+            invalidRoles: invalid,
+            allowedRoles: [...allowed],
+          },
+          { status: 400 }
+        );
+      }
+    }
   }
 
   const updated =

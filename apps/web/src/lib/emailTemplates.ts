@@ -65,9 +65,10 @@ RCC Recruiting Team`,
   },
 };
 
-// Used instead of the standard Interviewing body when the reviewer selected
-// specific roles. {{roles}} appears only here, so it can never reach a caller
-// that asks for an unfilled template.
+// Used instead of the standard Interviewing subject/body when the reviewer
+// selected specific roles. Named-role placeholders live only here so they
+// can never reach a caller that asks for an unfilled template.
+const INTERVIEWING_SUBJECT_WITH_ROLES = "Interview Invitation — {{opportunity}}";
 const INTERVIEWING_BODY_WITH_ROLES = `Hi {{name}},
 
 Thank you for your interest in RCC's {{opportunity}}. We were impressed by your application and would like to invite you to interview for {{roles}}.
@@ -94,7 +95,7 @@ export function getEmailTemplate(status: string, data: TemplateData): EmailTempl
   };
 
   return {
-    subject: fill(template.subject, filled),
-    body: fill(useRoles ? INTERVIEWING_BODY_WITH_ROLES : template.body, filled),
+    subject: fill(useRoles ? INTERVIEWING_SUBJECT_WITH_ROLES : template.subject, filled),
+    body:    fill(useRoles ? INTERVIEWING_BODY_WITH_ROLES    : template.body,    filled),
   };
 }

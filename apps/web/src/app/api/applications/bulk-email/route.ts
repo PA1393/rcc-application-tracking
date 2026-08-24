@@ -11,6 +11,7 @@ import {
   stripCrlf,
 } from "@/lib/emailService";
 import { getEmailTemplate } from "@/lib/emailTemplates";
+import { formatRoleList } from "@/lib/interviewRoles";
 
 export const maxDuration = 60; // Vercel Hobby ceiling
 
@@ -18,11 +19,15 @@ const MAX_BATCH = 10;
 
 // Small fill helper — mirrors emailTemplates.ts's internal fill() without
 // modifying that file. Used to apply per-recipient placeholders to override text.
-function fill(template: string, data: { name: string; role: string; opportunity: string }): string {
+function fill(
+  template: string,
+  data: { name: string; role: string; opportunity: string; roles?: string[] }
+): string {
   return template
     .replace(/\{\{name\}\}/g, data.name)
     .replace(/\{\{role\}\}/g, data.role)
-    .replace(/\{\{opportunity\}\}/g, data.opportunity);
+    .replace(/\{\{opportunity\}\}/g, data.opportunity)
+    .replace(/\{\{roles\}\}/g, formatRoleList(data.roles ?? []));
 }
 
 type BulkEmailResult =
@@ -115,6 +120,37 @@ export async function POST(request: Request) {
   });
   const fetchedMap = new Map(fetched.map((a) => [a.id, a]));
 
+  // ── {{roles}} guard ──────────────────────────────────────────────────────
+  // If the caller uses {{roles}} anywhere, an Interviewing recipient with an
+  // empty interview_roles array would fill it to "" and produce a
+  // grammatically broken sentence. Refuse the whole batch with the offending
+  // names so the reviewer can either fix those applicants' roles or edit
+  // {{roles}} out of the message. Rate-limit slots are already reserved and
+  // not refunded here — matches the existing over-consumption policy above.
+  const usesRolesPlaceholder =
+    (subjectOverride?.includes("{{roles}}") ?? false) ||
+    (bodyOverride?.includes("{{roles}}") ?? false);
+
+  if (usesRolesPlaceholder) {
+    const emptyRoleTargets = fetched.filter(
+      (app) =>
+        app.status === "Interviewing" &&
+        (app.interview_roles?.length ?? 0) === 0
+    );
+    if (emptyRoleTargets.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Some selected applicants have no interview roles set, but the message uses {{roles}}. " +
+            "Add roles to those applicants or remove {{roles}} from the message.",
+          missingRoleIds: emptyRoleTargets.map((a) => a.id),
+          missingRoleNames: emptyRoleTargets.map((a) => a.applicant.name),
+        },
+        { status: 400 }
+      );
+    }
+  }
+
   // ── Process each id in input order ───────────────────────────────────────
   const results: BulkEmailResult[] = [];
 
@@ -146,11 +182,15 @@ export async function POST(request: Request) {
       continue;
     }
 
-    // Resolve subject & body — override with placeholder fill, or use template
+    // Resolve subject & body — override with placeholder fill, or use template.
+    // `roles` drives the {{roles}} placeholder and the roles-branch of the
+    // Interviewing template (INTERVIEWING_BODY_WITH_ROLES); passing an empty
+    // array preserves today's single-role behavior.
     const templateData = {
       name: app.applicant.name,
       role: app.role,
       opportunity: app.opportunity,
+      roles: app.interview_roles ?? [],
     };
 
     let subject: string;

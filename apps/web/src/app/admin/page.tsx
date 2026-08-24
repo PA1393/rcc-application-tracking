@@ -439,6 +439,59 @@ function EmailDraftModal({
   );
 }
 
+// ── Interview role picker (shared) ────────────────────────────────────────────
+// Rendered both inside the applicant modal's status-change overlay and inside
+// the page-level DropRolePickerModal (below), so a drag into Interviewing
+// surfaces the same picker with the same constraints as the modal path.
+function InterviewRolePicker({
+  options,
+  selected,
+  onChange,
+}: {
+  options: Array<{ rank: 1 | 2 | 3; role: string }>;
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <div className="flex gap-2 flex-wrap">
+      {options.map((p) => {
+        const picked = selected.includes(p.role);
+        const atLimit = selected.length >= MAX_INTERVIEW_ROLES;
+        const disabled = !picked && atLimit;
+        return (
+          <button
+            key={p.rank}
+            type="button"
+            disabled={disabled}
+            onClick={() =>
+              onChange(
+                selected.includes(p.role)
+                  ? selected.filter((r) => r !== p.role)
+                  : [...selected, p.role]
+              )
+            }
+            className="transition-colors disabled:cursor-not-allowed"
+            style={{
+              fontSize: 11,
+              padding: "5px 10px",
+              borderRadius: 999,
+              cursor: disabled ? "not-allowed" : "pointer",
+              opacity: disabled ? 0.35 : 1,
+              background: picked ? "rgba(167,139,250,0.16)" : "transparent",
+              border: picked
+                ? "0.5px solid rgba(167,139,250,0.45)"
+                : "0.5px solid rgba(139,130,190,0.12)",
+              color: picked ? "#a78bfa" : "#A09BB5",
+            }}
+          >
+            {RANK_LABELS[p.rank]}: {p.role}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Applicant Modal ───────────────────────────────────────────────────────────
 
 const ACTION_STATUSES = ["Interviewing", "Accepted", "Rejected"] as const;
@@ -497,6 +550,13 @@ function ApplicantModal({
   const [notesPanelWidth, setNotesPanelWidth] = useState(NOTES_DEFAULT_WIDTH);
   const [isDragging, setIsDragging] = useState(false);
   const [handleHover, setHandleHover] = useState(false);
+  // In-place edit of interview_roles from the "Interviewing for" chip row.
+  // Draft mirrors the row's current roles until Save; Save is blocked when the
+  // draft is empty because the chip row (and this Edit affordance) is gated on
+  // interview_roles.length > 0.
+  const [editingRoles, setEditingRoles] = useState(false);
+  const [roleDraft, setRoleDraft] = useState<string[]>([]);
+  const [savingRoles, setSavingRoles] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
@@ -543,6 +603,9 @@ function ApplicantModal({
       interview_notes:   app.interview_notes   ?? "",
       decision_notes:    app.decision_notes    ?? "",
     });
+    // A draft roles-edit must not carry across to a different application.
+    setEditingRoles(false);
+    setRoleDraft([]);
   }, [activeTab, allApps]);
 
   // A typed confirmation phrase must never carry across to a different application.
@@ -564,6 +627,10 @@ function ApplicantModal({
         if (emailDraftStatus) return;
         if (pendingStatus) {
           setPendingStatus(null);
+        } else if (editingRoles) {
+          if (savingRoles) return;
+          setEditingRoles(false);
+          setRoleDraft([]);
         } else if (deleteOpen) {
           if (deleting) return;
           setDeleteOpen(false);
@@ -576,7 +643,7 @@ function ApplicantModal({
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, pendingStatus, emailDraftStatus, deleteOpen, deleting]);
+  }, [onClose, pendingStatus, emailDraftStatus, deleteOpen, deleting, editingRoles, savingRoles]);
 
   const activeApp = allApps.find((a) => a.id === activeTab) ?? initialApp;
   // E-Board rows also carry track "Ambassador" but have no ranked preference keys,
@@ -602,6 +669,35 @@ function ApplicantModal({
     if (handleAuthFailure(res)) return;
     if (!res.ok) {
       onToast("Failed to save notes. Please try again.", "error");
+    }
+  }
+
+  async function saveRoles() {
+    if (roleDraft.length === 0) return;
+    setSavingRoles(true);
+    try {
+      const res = await fetch("/api/applications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: activeApp.id, interview_roles: roleDraft }),
+      });
+      if (handleAuthFailure(res)) return;
+      if (!res.ok) {
+        onToast("Failed to update interview roles. Please try again.", "error");
+        return;
+      }
+      const savedId = activeApp.id;
+      const savedRoles = roleDraft;
+      setAllApps((prev) =>
+        prev.map((a) => (a.id === savedId ? { ...a, interview_roles: savedRoles } : a))
+      );
+      onStatusChange(savedId, activeApp.status, savedRoles);
+      setEditingRoles(false);
+      setRoleDraft([]);
+    } catch {
+      onToast("Failed to update interview roles. Please try again.", "error");
+    } finally {
+      setSavingRoles(false);
     }
   }
 
@@ -818,42 +914,11 @@ function ApplicantModal({
                     <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
                       Roles being considered <span style={{ textTransform: "none" }}>(optional, up to 3)</span>
                     </p>
-                    <div className="flex gap-2 flex-wrap">
-                      {interviewRoleOptions.map((p) => {
-                        const picked = selectedInterviewRoles.includes(p.role);
-                        const atLimit = selectedInterviewRoles.length >= MAX_INTERVIEW_ROLES;
-                        const disabled = !picked && atLimit;
-                        return (
-                          <button
-                            key={p.rank}
-                            type="button"
-                            disabled={disabled}
-                            onClick={() =>
-                              setSelectedInterviewRoles((prev) =>
-                                prev.includes(p.role)
-                                  ? prev.filter((r) => r !== p.role)
-                                  : [...prev, p.role]
-                              )
-                            }
-                            className="transition-colors disabled:cursor-not-allowed"
-                            style={{
-                              fontSize: 11,
-                              padding: "5px 10px",
-                              borderRadius: 999,
-                              cursor: disabled ? "not-allowed" : "pointer",
-                              opacity: disabled ? 0.35 : 1,
-                              background: picked ? "rgba(167,139,250,0.16)" : "transparent",
-                              border: picked
-                                ? "0.5px solid rgba(167,139,250,0.45)"
-                                : "0.5px solid rgba(139,130,190,0.12)",
-                              color: picked ? "#a78bfa" : "#A09BB5",
-                            }}
-                          >
-                            {RANK_LABELS[p.rank]}: {p.role}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <InterviewRolePicker
+                      options={interviewRoleOptions}
+                      selected={selectedInterviewRoles}
+                      onChange={setSelectedInterviewRoles}
+                    />
                   </div>
                 )}
 
@@ -991,7 +1056,7 @@ function ApplicantModal({
               <span style={{ fontSize: 11, fontWeight: 500, color: "#6A6580", letterSpacing: "0.3px", whiteSpace: "nowrap" }}>
                 Interviewing for
               </span>
-              {activeApp.interview_roles.map((role) => (
+              {!editingRoles && activeApp.interview_roles.map((role) => (
                 <span
                   key={role}
                   style={{
@@ -1007,6 +1072,93 @@ function ApplicantModal({
                   {role}
                 </span>
               ))}
+
+              {!editingRoles && canPickInterviewRoles && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRoleDraft(activeApp.interview_roles);
+                    setEditingRoles(true);
+                  }}
+                  title="Edit interview roles"
+                  className="transition-colors"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: "#A09BB5",
+                    background: "transparent",
+                    border: "0.5px solid rgba(139,130,190,0.18)",
+                    borderRadius: 6,
+                    padding: "3px 8px",
+                    cursor: "pointer",
+                    marginLeft: 4,
+                    whiteSpace: "nowrap",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = "#6B5FCC";
+                    (e.currentTarget as HTMLButtonElement).style.color = "#EAE8F2";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(139,130,190,0.18)";
+                    (e.currentTarget as HTMLButtonElement).style.color = "#A09BB5";
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+
+              {editingRoles && (
+                <>
+                  <div className="w-full" style={{ marginTop: 4 }}>
+                    <InterviewRolePicker
+                      options={interviewRoleOptions}
+                      selected={roleDraft}
+                      onChange={setRoleDraft}
+                    />
+                  </div>
+                  <div className="w-full flex gap-2 justify-end" style={{ marginTop: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (savingRoles) return;
+                        setEditingRoles(false);
+                        setRoleDraft([]);
+                      }}
+                      disabled={savingRoles}
+                      className="transition-colors disabled:opacity-50"
+                      style={{
+                        fontSize: 11,
+                        color: "#A09BB5",
+                        background: "transparent",
+                        border: "0.5px solid rgba(139,130,190,0.18)",
+                        borderRadius: 6,
+                        padding: "4px 10px",
+                        cursor: savingRoles ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveRoles}
+                      disabled={savingRoles || roleDraft.length === 0}
+                      title={roleDraft.length === 0 ? "Select at least one role" : undefined}
+                      className="transition-colors disabled:opacity-50"
+                      style={{
+                        fontSize: 11,
+                        color: "#EAE8F2",
+                        background: "#6B5FCC",
+                        border: "0.5px solid rgba(167,139,250,0.35)",
+                        borderRadius: 6,
+                        padding: "4px 10px",
+                        cursor: savingRoles || roleDraft.length === 0 ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {savingRoles ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1914,7 +2066,7 @@ function BulkInterviewEmailDialog({
   onClose,
 }: {
   selectedApps: Application[];
-  onSend: (subject: string, body: string) => void;
+  onSend: (subject: string | null, body: string | null) => void;
   onClose: () => void;
 }) {
   // Compute default subject/body from template (first app for preview)
@@ -1949,8 +2101,24 @@ function BulkInterviewEmailDialog({
   const previewSubject = fillTemplate(subject, previewData);
   const previewBody = fillTemplate(body, previewData);
 
+  // When the reviewer hasn't edited either field, we omit both overrides and
+  // let the server pick the per-recipient template branch (roles vs single).
+  const isPristine =
+    subject === rawTemplate.subject && body === rawTemplate.body;
+
+  // If the message references {{roles}}, any recipient without interview_roles
+  // would render a broken sentence. Preemptively block the send here; the
+  // server enforces the same rule.
+  const usesRolesPlaceholder =
+    subject.includes("{{roles}}") || body.includes("{{roles}}");
+  const missingRoles = selectedApps.filter(
+    (a) => (a.interview_roles?.length ?? 0) === 0
+  );
+  const rolesGuardFail =
+    !isPristine && usesRolesPlaceholder && missingRoles.length > 0;
+
   const rateLimitWarning = sendable > 10;
-  const canSend = sendable > 0 && !rateLimitWarning;
+  const canSend = sendable > 0 && !rateLimitWarning && !rolesGuardFail;
 
   return (
     <div
@@ -2020,9 +2188,31 @@ function BulkInterviewEmailDialog({
             <p style={{ fontSize: 11.5, color: "#6A6580", marginTop: 4 }}>
               Placeholders <code style={{ color: "#9a98ab" }}>{"{{name}}"}</code>,{" "}
               <code style={{ color: "#9a98ab" }}>{"{{role}}"}</code>,{" "}
-              <code style={{ color: "#9a98ab" }}>{"{{opportunity}}"}</code> are filled per recipient.
+              <code style={{ color: "#9a98ab" }}>{"{{opportunity}}"}</code>,{" "}
+              <code style={{ color: "#9a98ab" }}>{"{{roles}}"}</code> are filled per recipient.
             </p>
           </div>
+
+          {/* Missing-roles guard: message uses {{roles}} but some recipients have none */}
+          {rolesGuardFail && (
+            <div
+              className="px-4 py-3"
+              style={{ background: "rgba(240,96,96,0.08)", borderLeft: "3px solid #F06060", borderRadius: 6 }}
+            >
+              <p style={{ fontSize: 13, color: "#F06060", marginBottom: 4 }}>
+                Cannot send: the message uses <code>{"{{roles}}"}</code> but{" "}
+                {missingRoles.length} recipient{missingRoles.length === 1 ? "" : "s"}{" "}
+                {missingRoles.length === 1 ? "has" : "have"} no interview roles set.
+              </p>
+              <p style={{ fontSize: 12, color: "#A09BB5" }}>
+                {missingRoles.slice(0, 5).map((a) => a.applicant.name).join(", ")}
+                {missingRoles.length > 5 ? `, and ${missingRoles.length - 5} more` : ""}.
+              </p>
+              <p style={{ fontSize: 12, color: "#6A6580", marginTop: 4 }}>
+                Set interview roles for those applicants, or remove <code>{"{{roles}}"}</code> from the message.
+              </p>
+            </div>
+          )}
 
           {/* Preview */}
           {firstApp && (
@@ -2062,7 +2252,10 @@ function BulkInterviewEmailDialog({
             Cancel
           </button>
           <button
-            onClick={() => canSend && onSend(subject, body)}
+            onClick={() => {
+              if (!canSend) return;
+              onSend(isPristine ? null : subject, isPristine ? null : body);
+            }}
             disabled={!canSend}
             style={{
               fontSize: 13,
@@ -2076,6 +2269,84 @@ function BulkInterviewEmailDialog({
             }}
           >
             Send {sendable} email{sendable !== 1 ? "s" : ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Drop-to-Interviewing role picker (page-level) ─────────────────────────────
+// Rendered by AdminPage when an Ambassador card with ranked preferences is
+// dropped into the Interviewing column. Surfaces the same picker as the
+// modal's confirmation overlay before the status change commits.
+function DropRolePickerModal({
+  app,
+  onConfirm,
+  onCancel,
+  submitting,
+}: {
+  app: Application;
+  onConfirm: (roles: string[]) => void;
+  onCancel: () => void;
+  submitting: boolean;
+}) {
+  const options = getRankedPreferences(app.rawData);
+  const [selected, setSelected] = useState<string[]>([]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !submitting) onCancel();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel, submitting]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[55] flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+      onClick={() => { if (!submitting) onCancel(); }}
+    >
+      <div
+        className="p-6 max-w-sm w-full mx-4 shadow-2xl"
+        style={{ background: "#1C1930", border: "0.5px solid rgba(139,130,190,0.12)", borderRadius: 10 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="leading-relaxed mb-5" style={{ fontSize: 13, color: "#EAE8F2" }}>
+          Change{" "}
+          <span style={{ color: "#8B7FEE", fontWeight: 600 }}>{app.applicant.name}</span>'s
+          status to{" "}
+          <span style={{ fontWeight: 600, color: "#EAE8F2" }}>Interviewing</span>?
+        </p>
+
+        <div className="mb-5">
+          <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
+            Roles being considered <span style={{ textTransform: "none" }}>(optional, up to 3)</span>
+          </p>
+          <InterviewRolePicker
+            options={options}
+            selected={selected}
+            onChange={setSelected}
+          />
+        </div>
+
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onCancel}
+            disabled={submitting}
+            className="px-4 py-1.5 rounded-[8px] transition-colors disabled:opacity-50"
+            style={{ fontSize: 12, border: "0.5px solid rgba(139,130,190,0.12)", color: "#A09BB5", background: "transparent" }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm(selected)}
+            disabled={submitting}
+            className="px-4 py-1.5 rounded-[8px] transition-colors disabled:opacity-50"
+            style={{ fontSize: 12, background: "#6B5FCC", color: "#EAE8F2" }}
+          >
+            {submitting ? "Saving..." : "Confirm"}
           </button>
         </div>
       </div>
@@ -2105,6 +2376,11 @@ export default function AdminPage() {
   const [showBulkEmailDialog, setShowBulkEmailDialog] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // Held while the drop-into-Interviewing role picker is open. The card is
+  // NOT optimistically moved until the user confirms; cancel leaves the row
+  // in its source column untouched.
+  const [dropPending, setDropPending] = useState<Application | null>(null);
+  const [dropSubmitting, setDropSubmitting] = useState(false);
 
   // Always a fresh object, so repeated identical messages still restart the timer.
   const showToast = useCallback((message: string, tone: ToastTone = "info") => {
@@ -2269,6 +2545,16 @@ export default function AdminPage() {
       // stays behind the modal's confirmation flow. The column also refuses drops.
       if (newStatus === "Accepted") return;
 
+      // Ambassador applicants with ranked preferences get the same role picker
+      // the modal shows before the status change commits. E-Board rows (no
+      // _teamPreference keys) and non-Ambassador rows fall through.
+      if (newStatus === "Interviewing"
+          && app.track === "Ambassador"
+          && getRankedPreferences(app.rawData).length > 0) {
+        setDropPending(app);
+        return;
+      }
+
       const previousStatus = app.status;
       setApplications((prev) =>
         prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
@@ -2299,6 +2585,50 @@ export default function AdminPage() {
     },
     [applications, showToast]
   );
+
+  const confirmDropPending = useCallback(
+    async (roles: string[]) => {
+      if (!dropPending) return;
+      const id = dropPending.id;
+      const previousStatus = dropPending.status;
+      setDropSubmitting(true);
+      try {
+        const res = await fetch("/api/applications", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, status: "Interviewing", interview_roles: roles }),
+        });
+        if (handleAuthFailure(res)) return;
+        if (!res.ok) {
+          showToast("Failed to move applicant. Please try again.", "error");
+          return;
+        }
+        setApplications((prev) =>
+          prev.map((a) =>
+            a.id === id ? { ...a, status: "Interviewing", interview_roles: roles } : a
+          )
+        );
+        showToast(
+          roles.length > 0 ? `Moved to Interviewing for ${roles.length} role${roles.length === 1 ? "" : "s"}` : "Moved to Interviewing",
+          "success"
+        );
+        setDropPending(null);
+      } catch {
+        showToast("Failed to move applicant. Please try again.", "error");
+      } finally {
+        setDropSubmitting(false);
+      }
+      // previousStatus retained only for symmetry with handleCardDrop's revert;
+      // we do not optimistically move the card, so no revert is needed.
+      void previousStatus;
+    },
+    [dropPending, showToast]
+  );
+
+  const cancelDropPending = useCallback(() => {
+    if (dropSubmitting) return;
+    setDropPending(null);
+  }, [dropSubmitting]);
 
   const handleCardDragStart = useCallback((id: string) => setDraggingId(id), []);
   const handleCardDragEnd = useCallback(() => setDraggingId(null), []);
@@ -2402,24 +2732,40 @@ export default function AdminPage() {
   );
 
   const handleBulkEmail = useCallback(
-    async (subject: string, body: string) => {
+    async (subject: string | null, body: string | null) => {
       const ids = [...selectedIds];
       if (ids.length === 0) return;
 
       setIsBulkSending(true);
       setShowBulkEmailDialog(false);
       try {
+        // Pristine dialog sends omit subject/body so the server picks the
+        // per-recipient template branch (roles vs single) via getEmailTemplate.
+        const payload: { ids: string[]; subject?: string; body?: string } = { ids };
+        if (subject !== null) payload.subject = subject;
+        if (body !== null) payload.body = body;
+
         const res = await fetch("/api/applications/bulk-email", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids, subject, body }),
+          body: JSON.stringify(payload),
         });
 
         if (handleAuthFailure(res)) return;
 
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          showToast(data.error ?? "Bulk email failed. Please try again.", "error");
+          const names = Array.isArray(data.missingRoleNames)
+            ? (data.missingRoleNames as string[])
+            : [];
+          const suffix =
+            names.length > 0
+              ? ` (${names.slice(0, 3).join(", ")}${names.length > 3 ? `, +${names.length - 3} more` : ""})`
+              : "";
+          showToast(
+            (data.error ?? "Bulk email failed. Please try again.") + suffix,
+            "error"
+          );
           return;
         }
 
@@ -2510,7 +2856,13 @@ export default function AdminPage() {
       if (!prefs.some((p) => p === selectedTeam)) return false;
     }
     if (isPositionFilterable && selectedPosition !== "All Positions") {
-      if (isMatrixAmbassadorBoard) {
+      // Once an applicant is Interviewing with specific roles set, those roles
+      // define which position column they belong under — the earlier
+      // preferences no longer route them. Non-Interviewing rows (or ones with
+      // no roles picked yet) fall back to today's preference/role behavior.
+      if (a.status === "Interviewing" && a.interview_roles.length > 0) {
+        if (!a.interview_roles.includes(selectedPosition)) return false;
+      } else if (isMatrixAmbassadorBoard) {
         const prefs = [a.rawData?._teamPreference1, a.rawData?._teamPreference2, a.rawData?._teamPreference3];
         if (!prefs.some((p) => p === selectedPosition)) return false;
       } else {
@@ -3005,6 +3357,16 @@ export default function AdminPage() {
           onRefreshBoard={fetchApps}
           onToast={showToast}
           boardOpportunity={selectedOpportunity}
+        />
+      )}
+
+      {/* Drop-to-Interviewing role picker */}
+      {dropPending && (
+        <DropRolePickerModal
+          app={dropPending}
+          onConfirm={confirmDropPending}
+          onCancel={cancelDropPending}
+          submitting={dropSubmitting}
         />
       )}
 
