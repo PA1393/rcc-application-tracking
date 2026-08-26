@@ -181,11 +181,11 @@ const EBOARD_SIGNALS = [
   "campaign video (1 minute)",
 ];
 
-// Header unique to the new Lead & Ambassador matrix Google Form.
-// The portfolio question only appears on this form and is safe to use as the detection signal.
-const AMBASSADOR_MATRIX_SIGNALS = [
-  "if you are applying for graphic design lead or publicity vice president, please link your portfolio.",
-];
+// Matrix form has one column per role, all sharing AMBASSADOR_MATRIX_COLUMN_PREFIX.
+// Detecting on this structural pattern instead of any free-text question means
+// role additions or question rewordings can't break detection, and it fails in
+// exactly the same place the normalizer fails if the prefix ever changes.
+const MATRIX_COLUMN_DETECTION_THRESHOLD = 3;
 
 // Headers that only appear on Project / Intern Google Forms
 const PROJECT_SIGNALS = [
@@ -200,15 +200,23 @@ export function detectCsvFormType(
 ): "eboard" | "ambassador_matrix" | "project" | "unknown" {
   if (!rawData.length) return "unknown";
 
-  // Normalise headers from the first row for case-insensitive comparison
-  const headers = Object.keys(rawData[0]).map((h) => h.toLowerCase().trim());
+  // Original-case headers for the structural matrix check (prefix is case-sensitive).
+  const rawHeaders = Object.keys(rawData[0]);
+  // Lower-cased headers for the exact-match signal checks.
+  const headers = rawHeaders.map((h) => h.toLowerCase().trim());
 
   // E-Board MUST be checked before Ambassador — they share
   // "what position are you applying for?" as a header.
   // The unique signal "campaign video (1 minute)" disambiguates.
   if (EBOARD_SIGNALS.some((s) => headers.includes(s)))              return "eboard";
-  // Matrix form is detected by a question unique to that form.
-  if (AMBASSADOR_MATRIX_SIGNALS.some((s) => headers.includes(s)))  return "ambassador_matrix";
+
+  // Matrix form: many headers share AMBASSADOR_MATRIX_COLUMN_PREFIX, one per role.
+  // Threshold guards against a lone rewording that happens to reuse the phrasing.
+  const matrixColumnCount = rawHeaders.filter((h) =>
+    h.startsWith(AMBASSADOR_MATRIX_COLUMN_PREFIX)
+  ).length;
+  if (matrixColumnCount >= MATRIX_COLUMN_DETECTION_THRESHOLD)       return "ambassador_matrix";
+
   if (PROJECT_SIGNALS.some((s) => headers.includes(s)))             return "project";
   return "unknown";
 }

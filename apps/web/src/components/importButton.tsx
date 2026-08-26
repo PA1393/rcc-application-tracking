@@ -2,19 +2,10 @@
 
 import { useState, useRef, useEffect } from "react";
 import Papa from "papaparse";
+import { detectCsvFormType } from "@/lib/parseCsv";
 import { handleAuthFailure } from "@/lib/utils";
 
 const ADD_NEW = "__add_new__";
-
-const EBOARD_SIGNALS = [
-  "campaign video (1 minute)",
-];
-
-// Unique signal for the new Lead & Ambassador matrix form.
-// The portfolio question only appears on this form.
-const AMBASSADOR_MATRIX_SIGNALS = [
-  "if you are applying for graphic design lead or publicity vice president, please link your portfolio.",
-];
 
 type ImportSummary = {
   inserted: number;
@@ -107,6 +98,7 @@ export default function ImportButton({
   const [importing, setImporting] = useState(false);
   const [selectedFormType, setSelectedFormType] = useState<"project" | "ambassador" | "eboard">("project");
   const [detectedFormLabel, setDetectedFormLabel] = useState<string | null>(null);
+  const [detectedFormOk, setDetectedFormOk] = useState(true);
   const [importError, setImportError] = useState<string | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [errorsExpanded, setErrorsExpanded] = useState(false);
@@ -130,25 +122,34 @@ export default function ImportButton({
     const file = e.target.files?.[0] ?? null;
     setSelectedFile(file);
     setDetectedFormLabel(null);
+    setDetectedFormOk(true);
     if (!file) return;
 
+    // Reuse the server's detector so client label and server accept/reject
+    // can never disagree. Papa preview:1 gives the header row as one keyed
+    // object, which is exactly detectCsvFormType's input shape.
     const text = await file.text();
     const result = Papa.parse(text, { header: true, preview: 1 });
-    const headers = (result.meta.fields ?? []).map((h: string) => h.toLowerCase().trim());
+    const detected = detectCsvFormType((result.data ?? []) as any[]);
 
-    // E-Board must be checked before Ambassador — they share a header.
-    // Matrix form is the only supported Ambassador format.
-    const isEboard     = EBOARD_SIGNALS.some((s) => headers.includes(s));
-    const isAmbassador = !isEboard && AMBASSADOR_MATRIX_SIGNALS.some((s) => headers.includes(s));
-    const detectedType = isEboard ? "eboard" : isAmbassador ? "ambassador" : "project";
-    setSelectedFormType(detectedType);
-    setDetectedFormLabel(
-      isEboard
-        ? "E-Board form detected"
-        : isAmbassador
-        ? "Ambassador form detected"
-        : "Project / Intern form detected"
-    );
+    if (detected === "eboard") {
+      setSelectedFormType("eboard");
+      setDetectedFormLabel("E-Board form detected");
+      setDetectedFormOk(true);
+    } else if (detected === "ambassador_matrix") {
+      setSelectedFormType("ambassador");
+      setDetectedFormLabel("Ambassador form detected");
+      setDetectedFormOk(true);
+    } else if (detected === "project") {
+      setSelectedFormType("project");
+      setDetectedFormLabel("Project / Intern form detected");
+      setDetectedFormOk(true);
+    } else {
+      // Unknown: don't overwrite the selector — force the user to pick,
+      // so we can't confidently mislabel an unrecognized file.
+      setDetectedFormLabel("Couldn't recognize this form — pick the correct type below.");
+      setDetectedFormOk(false);
+    }
   }
 
   async function handleImport() {
@@ -175,6 +176,7 @@ export default function ImportButton({
         onImportSuccess();
         setSelectedFile(null);
         setDetectedFormLabel(null);
+        setDetectedFormOk(true);
         if (fileInputRef.current) fileInputRef.current.value = "";
         // Keep panel open to show summary
       } else {
@@ -354,8 +356,15 @@ export default function ImportButton({
                 ))}
               </div>
               {detectedFormLabel && (
-                <p className="mt-1.5" style={{ fontSize: 11, color: "#8B7FEE", opacity: 0.8 }}>
-                  ✓ {detectedFormLabel}
+                <p
+                  className="mt-1.5"
+                  style={{
+                    fontSize: 11,
+                    color: detectedFormOk ? "#8B7FEE" : "#F0B040",
+                    opacity: 0.9,
+                  }}
+                >
+                  {detectedFormOk ? "✓" : "⚠"} {detectedFormLabel}
                 </p>
               )}
             </div>
