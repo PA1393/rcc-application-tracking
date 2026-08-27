@@ -36,6 +36,12 @@ type Application = {
 const STATUSES = ["To Review", "Interviewing", "Rejected", "Accepted"] as const;
 type Status = (typeof STATUSES)[number];
 
+// How often to silently refetch the board so reviewers see each other's changes.
+// Bandwidth math (5 reviewers, 100-row opportunity, ~150 KB gzip/fetch) sits well
+// under Vercel Hobby limits at 15s; DB query volume and connection pool headroom
+// are the reason to stay at 15s rather than 10s.
+const POLL_INTERVAL_MS = 15_000;
+
 type ToastTone = "success" | "error" | "info";
 type Toast = { message: string; tone: ToastTone };
 
@@ -2420,25 +2426,130 @@ export default function AdminPage() {
     fetchOpportunities(true);
   }, [fetchOpportunities]);
 
-  const fetchApps = useCallback(() => {
-    if (!selectedOpportunity) return;
-    setLoadingApps(true);
-    fetch(`/api/applications?opportunity=${encodeURIComponent(selectedOpportunity)}`)
-      .then((r) => {
-        if (handleAuthFailure(r)) return null;
-        return r.ok ? r.json() : [];
-      })
-      .catch(() => [])
-      .then((data: unknown) => {
-        if (data === null) return;
-        setApplications(Array.isArray(data) ? (data as Application[]) : []);
-        setLoadingApps(false);
-      });
-  }, [selectedOpportunity]);
+  // pausedRef is true whenever a background silent refetch must not commit.
+  // A ref (not state) avoids restarting the interval every time one of the many
+  // pause-inducing flags flips. The effect below keeps it in sync with state.
+  const pausedRef = useRef(false);
+
+  const fetchAppsCore = useCallback(
+    (opts: { silent: boolean }) => {
+      if (!selectedOpportunity) return;
+      if (!opts.silent) setLoadingApps(true);
+      fetch(`/api/applications?opportunity=${encodeURIComponent(selectedOpportunity)}`)
+        .then((r) => {
+          if (handleAuthFailure(r)) return null;
+          // Silent path: on error, keep prev state — no blank flash, no toast.
+          if (!r.ok) return opts.silent ? null : [];
+          return r.json();
+        })
+        .catch(() => (opts.silent ? null : []))
+        .then((data: unknown) => {
+          if (data === null) {
+            if (!opts.silent) setLoadingApps(false);
+            return;
+          }
+          // Commit-time guard: a fetch that started while nothing was open must
+          // not clobber state if the user has since opened a modal or grabbed a
+          // card. The next interval tick will retry once the pause clears.
+          if (opts.silent && pausedRef.current) return;
+          const next = Array.isArray(data) ? (data as Application[]) : [];
+          setApplications((prev) => {
+            // Skip the re-render entirely when nothing meaningful changed.
+            // JSON.stringify is cheap enough at expected board sizes (100-300
+            // rows) and avoids maintaining a hand-rolled diff.
+            if (opts.silent && JSON.stringify(prev) === JSON.stringify(next)) return prev;
+            return next;
+          });
+          setSelectedIds((prev) => {
+            if (prev.size === 0) return prev;
+            const survivors = new Set(next.map((a) => a.id));
+            let changed = false;
+            const kept = new Set<string>();
+            prev.forEach((id) => {
+              if (survivors.has(id)) kept.add(id);
+              else changed = true;
+            });
+            return changed ? kept : prev;
+          });
+          if (!opts.silent) setLoadingApps(false);
+        });
+    },
+    [selectedOpportunity]
+  );
+
+  const fetchApps = useCallback(() => fetchAppsCore({ silent: false }), [fetchAppsCore]);
+  const fetchAppsSilent = useCallback(() => fetchAppsCore({ silent: true }), [fetchAppsCore]);
 
   useEffect(() => {
     fetchApps();
   }, [fetchApps]);
+
+  // Keep pausedRef in sync with anything a silent refetch could disturb:
+  // open modals, in-flight rename, active drag, or a backgrounded tab.
+  useEffect(() => {
+    pausedRef.current =
+      selectedApp !== null ||
+      dropPending !== null ||
+      showBulkEmailDialog ||
+      showAccessModal ||
+      renamingOpportunity ||
+      renameLoading ||
+      draggingId !== null ||
+      (typeof document !== "undefined" && document.hidden);
+  }, [
+    selectedApp,
+    dropPending,
+    showBulkEmailDialog,
+    showAccessModal,
+    renamingOpportunity,
+    renameLoading,
+    draggingId,
+  ]);
+
+  // Silent polling so cross-reviewer changes propagate without a manual reload.
+  // Interval is torn down and rebuilt only on opportunity switch; per-tick pause
+  // reads the ref so flag flips don't recreate the timer.
+  useEffect(() => {
+    if (!selectedOpportunity) return;
+    const id = setInterval(() => {
+      if (pausedRef.current) return;
+      fetchAppsSilent();
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [selectedOpportunity, fetchAppsSilent]);
+
+  // Return-from-hidden: refresh immediately so the reviewer doesn't wait up to
+  // POLL_INTERVAL_MS to see state that changed while their tab was in the back.
+  useEffect(() => {
+    function onVisibilityChange() {
+      if (typeof document === "undefined") return;
+      if (document.hidden) {
+        pausedRef.current = true;
+        return;
+      }
+      // Recompute the other pause conditions before firing.
+      pausedRef.current =
+        selectedApp !== null ||
+        dropPending !== null ||
+        showBulkEmailDialog ||
+        showAccessModal ||
+        renamingOpportunity ||
+        renameLoading ||
+        draggingId !== null;
+      if (!pausedRef.current) fetchAppsSilent();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [
+    fetchAppsSilent,
+    selectedApp,
+    dropPending,
+    showBulkEmailDialog,
+    showAccessModal,
+    renamingOpportunity,
+    renameLoading,
+    draggingId,
+  ]);
 
   // ── Bulk selection helpers ────────────────────────────────────────────────
   // Clear selection whenever the user switches to a different opportunity.
@@ -2529,8 +2640,11 @@ export default function AdminPage() {
             : a
         )
       );
+      // Pull concurrent changes by other reviewers now instead of waiting up
+      // to POLL_INTERVAL_MS after our own action.
+      fetchAppsSilent();
     },
-    []
+    [fetchAppsSilent]
   );
 
   const handleCardDrop = useCallback(
@@ -2579,11 +2693,12 @@ export default function AdminPage() {
           return;
         }
         showToast(`Moved to ${newStatus}`, "success");
+        fetchAppsSilent();
       } catch {
         revert();
       }
     },
-    [applications, showToast]
+    [applications, showToast, fetchAppsSilent]
   );
 
   const confirmDropPending = useCallback(
@@ -2613,6 +2728,7 @@ export default function AdminPage() {
           "success"
         );
         setDropPending(null);
+        fetchAppsSilent();
       } catch {
         showToast("Failed to move applicant. Please try again.", "error");
       } finally {
@@ -2622,7 +2738,7 @@ export default function AdminPage() {
       // we do not optimistically move the card, so no revert is needed.
       void previousStatus;
     },
-    [dropPending, showToast]
+    [dropPending, showToast, fetchAppsSilent]
   );
 
   const cancelDropPending = useCallback(() => {
