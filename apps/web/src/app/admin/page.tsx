@@ -941,7 +941,19 @@ function ApplicantModal({
                   </button>
                   <button
                     onClick={confirmStatusChange}
-                    disabled={changingStatus}
+                    disabled={
+                      changingStatus ||
+                      (pendingStatus === "Interviewing" &&
+                        canPickInterviewRoles &&
+                        selectedInterviewRoles.length === 0)
+                    }
+                    title={
+                      pendingStatus === "Interviewing" &&
+                      canPickInterviewRoles &&
+                      selectedInterviewRoles.length === 0
+                        ? "Select at least one role"
+                        : undefined
+                    }
                     className="px-4 py-1.5 rounded-[8px] transition-colors disabled:opacity-50"
                     style={{ fontSize: 12, background: "#6B5FCC", color: "#EAE8F2" }}
                   >
@@ -2348,7 +2360,8 @@ function DropRolePickerModal({
           </button>
           <button
             onClick={() => onConfirm(selected)}
-            disabled={submitting}
+            disabled={submitting || selected.length === 0}
+            title={selected.length === 0 ? "Select at least one role" : undefined}
             className="px-4 py-1.5 rounded-[8px] transition-colors disabled:opacity-50"
             style={{ fontSize: 12, background: "#6B5FCC", color: "#EAE8F2" }}
           >
