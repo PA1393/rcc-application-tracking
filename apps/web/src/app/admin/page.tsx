@@ -918,7 +918,7 @@ function ApplicantModal({
                 {pendingStatus === "Interviewing" && canPickInterviewRoles && (
                   <div className="mb-5">
                     <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
-                      Roles being considered <span style={{ textTransform: "none" }}>(optional, up to 3)</span>
+                      Roles being considered <span style={{ textTransform: "none" }}>(up to 3)</span>
                     </p>
                     <InterviewRolePicker
                       options={interviewRoleOptions}
@@ -1065,8 +1065,11 @@ function ApplicantModal({
             </div>
           )}
 
-          {/* Roles chosen at the Interviewing step */}
-          {activeApp.status === "Interviewing" && activeApp.interview_roles.length > 0 && (
+          {/* Roles chosen at the Interviewing step.
+              Gated on canPickInterviewRoles (not roles.length) so the Edit
+              pencil stays reachable for any Ambassador-with-prefs applicant
+              that landed in Interviewing before B1 was shipped. */}
+          {activeApp.status === "Interviewing" && canPickInterviewRoles && (
             <div
               className="flex items-center gap-2 px-6 shrink-0 flex-wrap"
               style={{ paddingTop: 10, paddingBottom: 10, borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}
@@ -1074,6 +1077,18 @@ function ApplicantModal({
               <span style={{ fontSize: 11, fontWeight: 500, color: "#6A6580", letterSpacing: "0.3px", whiteSpace: "nowrap" }}>
                 Interviewing for
               </span>
+              {!editingRoles && activeApp.interview_roles.length === 0 && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "#6A6580",
+                    fontStyle: "italic",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  No roles selected yet
+                </span>
+              )}
               {!editingRoles && activeApp.interview_roles.map((role) => (
                 <span
                   key={role}
@@ -2340,7 +2355,7 @@ function DropRolePickerModal({
 
         <div className="mb-5">
           <p className="mb-2 uppercase tracking-[0.6px]" style={{ fontSize: 11, color: "#6A6580" }}>
-            Roles being considered <span style={{ textTransform: "none" }}>(optional, up to 3)</span>
+            Roles being considered <span style={{ textTransform: "none" }}>(up to 3)</span>
           </p>
           <InterviewRolePicker
             options={options}
