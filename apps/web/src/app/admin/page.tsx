@@ -3000,13 +3000,7 @@ export default function AdminPage() {
       if (!prefs.some((p) => p === selectedTeam)) return false;
     }
     if (isPositionFilterable && selectedPosition !== "All Positions") {
-      // Once an applicant is Interviewing with specific roles set, those roles
-      // define which position column they belong under — the earlier
-      // preferences no longer route them. Non-Interviewing rows (or ones with
-      // no roles picked yet) fall back to today's preference/role behavior.
-      if (a.status === "Interviewing" && a.interview_roles.length > 0) {
-        if (!a.interview_roles.includes(selectedPosition)) return false;
-      } else if (isMatrixAmbassadorBoard) {
+      if (isMatrixAmbassadorBoard) {
         const prefs = [a.rawData?._teamPreference1, a.rawData?._teamPreference2, a.rawData?._teamPreference3];
         if (!prefs.some((p) => p === selectedPosition)) return false;
       } else {
