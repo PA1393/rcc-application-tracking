@@ -1,10 +1,14 @@
-import { formatRoleList } from "./interviewRoles";
+import { formatRoleList, splitRoleValues } from "./interviewRoles";
+import { formatRoleForDisplay } from "./roleDisplay";
 
 type TemplateData = {
   name: string;
   role: string;
   opportunity: string;
   roles?: string[];
+  // Gates role-name shortening. Ambassador role names are already short and
+  // several are only distinguished by their suffix, so they are left whole.
+  track?: string | null;
 };
 
 type EmailTemplate = {
@@ -78,6 +82,19 @@ We'll follow up shortly with scheduling details. In the meantime, please don't h
 Best,
 RCC Recruiting Team`;
 
+// A multi-select role cell holds every project the applicant picked. Spelled out
+// in a subject line that overruns MAX_SUBJECT_LEN (200) and the send is rejected
+// as invalid-subject — a five-project applicant produces 222 chars for
+// Interviewing and 239 for Accepted. Name the opportunity instead, the same way
+// the interview-roles branch already does. Keyed on the role splitting into more
+// than one value rather than on a character count, so the subject line has a
+// predictable shape instead of changing form at an arbitrary length.
+// Rejected already names the opportunity and needs no variant.
+const MULTI_ROLE_SUBJECTS: Record<string, string> = {
+  Interviewing: INTERVIEWING_SUBJECT_WITH_ROLES,
+  Accepted: "Congratulations! You've been selected — {{opportunity}}",
+};
+
 export function getEmailTemplate(status: string, data: TemplateData): EmailTemplate {
   const template = TEMPLATES[status];
   if (!template) {
@@ -89,13 +106,22 @@ export function getEmailTemplate(status: string, data: TemplateData): EmailTempl
 
   const filled: FilledData = {
     name: data.name,
-    role: useRoles ? selected[0] : data.role,
+    // Applicants picked these names off the form, so the short label is the
+    // part they recognise: "the LegalBee position", not the full pitch.
+    // interview_roles (selected[0]) are Ambassador-only and stay whole.
+    role: useRoles ? selected[0] : formatRoleForDisplay(data.role, data.track),
     opportunity: data.opportunity,
     roles: formatRoleList(selected),
   };
 
+  // Bodies are not length-bound (MAX_BODY_LEN is 50,000) and keep the full list.
+  const multiRole = splitRoleValues(data.role ?? "").length > 1;
+  const subjectTemplate = useRoles
+    ? INTERVIEWING_SUBJECT_WITH_ROLES
+    : (multiRole && MULTI_ROLE_SUBJECTS[status]) || template.subject;
+
   return {
-    subject: fill(useRoles ? INTERVIEWING_SUBJECT_WITH_ROLES : template.subject, filled),
-    body:    fill(useRoles ? INTERVIEWING_BODY_WITH_ROLES    : template.body,    filled),
+    subject: fill(subjectTemplate, filled),
+    body:    fill(useRoles ? INTERVIEWING_BODY_WITH_ROLES : template.body, filled),
   };
 }

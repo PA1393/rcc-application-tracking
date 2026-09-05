@@ -1,4 +1,4 @@
-import { normalizeData, normalizeAmbassadorMatrixData, normalizeEboardData, parseRawCsv, detectCsvFormType } from "@/lib/parseCsv";
+import { normalizeData, normalizeAmbassadorMatrixData, normalizeEboardData, parseRawCsv, detectCsvFormType, resolveRoleHeader } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
@@ -88,6 +88,36 @@ export async function POST(request: Request) {
      // existing === null means this is a new opportunity — allow the import
    }
 
+   // ── Role column must be identifiable ─────────────────────────────────────
+   // A reworded role header used to match nothing and fall through to
+   // role="Unknown" at upsert time, silently. Because role is part of
+   // @@unique([applicant_id, role, season]), two forms that both fell through
+   // collided on that key and overwrote each other. Fail the file instead, so a
+   // rewording surfaces here rather than as bad rows. Scoped to the project
+   // path: the E-Board and Ambassador normalizers read fixed keys of their own.
+   let roleAmbiguityWarning: string | null = null;
+   if (formType !== "eboard" && formType !== "ambassador") {
+     const headers = Object.keys(rawParsedData[0] ?? {});
+     const roleMatch = resolveRoleHeader(headers);
+     if (!roleMatch.header) {
+       return NextResponse.json(
+         {
+           error:
+             "Could not identify a role/project column in this CSV. The question may have been reworded. Headers seen: " +
+             headers.join(" | "),
+         },
+         { status: 400 }
+       );
+     }
+     // More than one column looks like the role question. The leftmost is used;
+     // say so rather than picking silently, since the choice is a coin flip.
+     if (roleMatch.ambiguousWith.length > 0) {
+       roleAmbiguityWarning =
+         `More than one column looked like the role question. Used "${roleMatch.header}"; also matched: ` +
+         roleMatch.ambiguousWith.map((h) => `"${h}"`).join(", ");
+     }
+   }
+
    const cleanData =
      formType === "eboard"
        ? normalizeEboardData(rawParsedData, opportunity)
@@ -101,6 +131,7 @@ export async function POST(request: Request) {
    let skipped = 0;
    
    const errors: string[] = [];
+   if (roleAmbiguityWarning) errors.push(roleAmbiguityWarning);
    
    for (const applicant of cleanData) {
      // skip records flagged invalid during normalization

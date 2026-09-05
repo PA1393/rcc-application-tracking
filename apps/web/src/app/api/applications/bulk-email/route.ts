@@ -191,6 +191,7 @@ export async function POST(request: Request) {
       role: app.role,
       opportunity: app.opportunity,
       roles: app.interview_roles ?? [],
+      track: app.track,
     };
 
     let subject: string;
