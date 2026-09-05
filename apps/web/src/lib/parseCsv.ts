@@ -19,6 +19,83 @@ import Papa from "papaparse";
 
 
 
+// ── Header matching ───────────────────────────────────────────────────────────
+//
+// Headers used to be matched by exact equality against a hand-kept list, first
+// list entry wins. That failed two ways: a reworded header matched nothing and
+// fell through to role="Unknown" silently, and on a form with several plausible
+// columns the list order decided the winner rather than the column's specificity.
+// Matching is now by specificity, and an unmatched role column is a hard error.
+
+// Google Forms headers carry smart apostrophes, embedded newlines and doubled
+// spaces. Normalize once so every matcher below compares the same shape.
+function normalizeHeader(header: string): string {
+  return header
+    .toLowerCase()
+    .replace(/[\u2018\u2019']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Applicants are deduped by email, so the institutional address has to win over
+// any other contact column on the same form. The Consulting form carries three:
+// "Email Address" (Google auto-collected, often personal), "SJSU Email Address",
+// and "Preferred / Personal Email".
+const EMAIL_SCORE_INSTITUTIONAL = 100;
+const EMAIL_SCORE_GENERIC = 50;
+
+// A column naming some address other than the applicant's identity. Storing one
+// of these as the email forks the applicant into a second record.
+const EMAIL_DISQUALIFIERS = [
+  "preferred", "personal", "alternate", "alternative", "secondary", "parent", "guardian",
+];
+const EMAIL_INSTITUTIONAL_TOKENS = ["sjsu", "school", "university", "campus"];
+
+function scoreEmailHeader(header: string): number {
+  const h = normalizeHeader(header);
+  if (!h.includes("email") && !h.includes("e-mail")) return 0;
+  if (EMAIL_DISQUALIFIERS.some((t) => h.includes(t))) return 0;
+  if (EMAIL_INSTITUTIONAL_TOKENS.some((t) => h.includes(t))) return EMAIL_SCORE_INSTITUTIONAL;
+  return EMAIL_SCORE_GENERIC;
+}
+
+// Highest score wins; ties go to the leftmost column, since Papa preserves CSV
+// column order in Object.keys.
+export function findEmailHeader(rowHeaders: string[]): string | null {
+  let best: string | null = null;
+  let bestScore = 0;
+  for (const header of rowHeaders) {
+    const score = scoreEmailHeader(header);
+    if (score > bestScore) {
+      bestScore = score;
+      best = header;
+    }
+  }
+  return best;
+}
+
+const ROLE_VARIATIONS = [
+  'role',
+  'position',
+  'Which project are you applying for?',
+  'what position are you applying for?',
+  'which role are you interested in?',
+  'Which Position Are You Interested In? Details on roles available!',
+  "Select the Position You're Applying For",
+];
+
+// Exported so /api/import can reject a file whose role column it cannot identify
+// before any row is written. Pass 2 replaces the body with tiered matching; the
+// signature is the seam.
+export function findRoleHeader(rowHeaders: string[]): string | null {
+  for (const variation of ROLE_VARIATIONS) {
+    const target = normalizeHeader(variation);
+    const matched = rowHeaders.find((header) => normalizeHeader(header) === target);
+    if (matched) return matched;
+  }
+  return null;
+}
+
   export function normalizeData(rawData: any[], opportunity: string = ""): any[] {
 
   // Java: for(row : rawData) -> TS: .map()
@@ -33,21 +110,21 @@ import Papa from "papaparse";
 
 
 
-    const emailVariations = ['sjsu email', 'email', 'email address', 'Email Address', 'SJSU Email Address'];
     const nameVariations = ['name', 'full name','Name (First Last)', 'Full Name (First Last)', 'Full Name (First and Last)', 'applicant name', "what is your first and last name?"]; //modify
-    const roleVariations = ['role', 'position','Which project are you applying for?', 'what position are you applying for?', 'which role are you interested in?', 'Which Position Are You Interested In? Details on roles available!', 'Select the Position Youre Applying For']; //modify
 
     // Find which header in the row matches our list
     const rowHeaders = Object.keys(row);
 
-    for (const variation of emailVariations) {
-      const matchedHeader = rowHeaders.find(
-        (header) => header.toLowerCase().trim() === variation.toLowerCase()
-      );
+    const emailHeader = findEmailHeader(rowHeaders);
+    if (emailHeader) {
+      normalizedRow.email = (row[emailHeader] ?? "").trim().toLowerCase();
 
-      if (matchedHeader) {
-        normalizedRow.email = row[matchedHeader].trim().toLowerCase();
-        break; // found best email match
+      // Never demote to a less specific column when the institutional one is
+      // blank on this row. Falling back is exactly how a personal address ends
+      // up as an applicant's identity and forks them into a second record.
+      if (!normalizedRow.email && scoreEmailHeader(emailHeader) === EMAIL_SCORE_INSTITUTIONAL) {
+        normalizedRow._invalid = true;
+        normalizedRow._reason = `Blank "${emailHeader}" — refusing to fall back to another email column`;
       }
     }
 
@@ -63,20 +140,15 @@ import Papa from "papaparse";
         }
     }
 
-    //role variations
-    for (const variation of roleVariations) {
-        const matchedHeader = rowHeaders.find(
-            (header) => header.toLowerCase().trim() === variation.toLowerCase()
-        );
-
-        if (matchedHeader) {
-            normalizedRow.role = row[matchedHeader].trim();
-            break;
-        }
+    //role
+    const roleHeader = findRoleHeader(rowHeaders);
+    if (roleHeader) {
+        normalizedRow.role = (row[roleHeader] ?? "").trim();
     }
 
-    // mark row invalid if essential fields are missing
-    if (!normalizedRow.email || !normalizedRow.name) {
+    // mark row invalid if essential fields are missing.
+    // Guarded so a more specific reason set above is not overwritten.
+    if (!normalizedRow._invalid && (!normalizedRow.email || !normalizedRow.name)) {
       normalizedRow._invalid = true;
       normalizedRow._reason = "Missing email or name";
     }

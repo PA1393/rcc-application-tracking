@@ -1,4 +1,4 @@
-import { normalizeData, normalizeAmbassadorMatrixData, normalizeEboardData, parseRawCsv, detectCsvFormType } from "@/lib/parseCsv";
+import { normalizeData, normalizeAmbassadorMatrixData, normalizeEboardData, parseRawCsv, detectCsvFormType, findRoleHeader } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
@@ -86,6 +86,27 @@ export async function POST(request: Request) {
        }
      }
      // existing === null means this is a new opportunity — allow the import
+   }
+
+   // ── Role column must be identifiable ─────────────────────────────────────
+   // A reworded role header used to match nothing and fall through to
+   // role="Unknown" at upsert time, silently. Because role is part of
+   // @@unique([applicant_id, role, season]), two forms that both fell through
+   // collided on that key and overwrote each other. Fail the file instead, so a
+   // rewording surfaces here rather than as bad rows. Scoped to the project
+   // path: the E-Board and Ambassador normalizers read fixed keys of their own.
+   if (formType !== "eboard" && formType !== "ambassador") {
+     const headers = Object.keys(rawParsedData[0] ?? {});
+     if (!findRoleHeader(headers)) {
+       return NextResponse.json(
+         {
+           error:
+             "Could not identify a role/project column in this CSV. The question may have been reworded. Headers seen: " +
+             headers.join(" | "),
+         },
+         { status: 400 }
+       );
+     }
    }
 
    const cleanData =
