@@ -33,6 +33,35 @@ export function normalizeInterviewRoles(
   return { ok: true, value: cleaned };
 }
 
+// A multi-select role question arrives as one comma-joined cell, e.g. the
+// Project Group form's "select all that apply". The board filter and the email
+// subject both need the individual values, so the split has one definition.
+//
+// Commas also occur *inside* project names — the Consulting form has
+// "Musical Memories Foundation (Marketing, Multimedia & Outreach)" — so only a
+// comma at bracket depth zero separates two values. An unbalanced opener leaves
+// the remainder as a single value, which degrades to one over-long filter option
+// rather than to several fragments of a name.
+export function splitRoleValues(role: string): string[] {
+  const values: string[] = [];
+  let current = "";
+  let depth = 0;
+
+  for (const char of role) {
+    if (char === "(" || char === "[") depth++;
+    else if (char === ")" || char === "]") depth = Math.max(0, depth - 1);
+    else if (char === "," && depth === 0) {
+      values.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  values.push(current);
+
+  return values.map((r) => r.trim()).filter(Boolean);
+}
+
 export function formatRoleList(roles: string[]): string {
   const cleaned = roles.map((r) => r.trim()).filter(Boolean);
   if (cleaned.length === 0) return "";

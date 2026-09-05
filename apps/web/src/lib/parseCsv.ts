@@ -74,7 +74,9 @@ export function findEmailHeader(rowHeaders: string[]): string | null {
   return best;
 }
 
-const ROLE_VARIATIONS = [
+// Tier A: headers we have actually seen. Exact (normalized) match, so a form we
+// already know keeps matching deterministically rather than through the pattern.
+const ROLE_KNOWN_HEADERS = [
   'role',
   'position',
   'Which project are you applying for?',
@@ -84,16 +86,71 @@ const ROLE_VARIATIONS = [
   "Select the Position You're Applying For",
 ];
 
+const ROLE_TIER_KNOWN = 300;
+const ROLE_TIER_PATTERN = 200;
+
+// Tier B: the shape of a role question rather than its exact wording. The
+// leading interrogative is what does the work — plain keyword containment
+// false-positives on real headers that merely mention a project or a role,
+// e.g. "Skills:  LegalBee\nWhat skills … most relevant to this project?
+// (select all that apply …)", "Would you be interested in serving as the
+// Project Lead for Lucid?", "Primary Role Preference (1st Choice)" and
+// "Role Fit & Experience\nPlease respond once per role you are applying to".
+const ROLE_NOUNS = ["role", "position", "project"];
+const ROLE_APPLY_VERBS = ["applying", "apply for", "interested in"];
+const ROLE_SELECT_VERBS = ["applying", "apply for"];
+
+function scoreRoleHeader(header: string): number {
+  const h = normalizeHeader(header);
+
+  // The Ambassador matrix ships one bracketed column per role, e.g.
+  // "Select the Position You're Applying For [Workshops Lead]", which satisfies
+  // the "select" anchor below. Those belong to normalizeAmbassadorMatrixData.
+  if (h.endsWith("]")) return 0;
+
+  if (ROLE_KNOWN_HEADERS.some((v) => normalizeHeader(v) === h)) return ROLE_TIER_KNOWN;
+
+  const hasNoun = ROLE_NOUNS.some((n) => h.includes(n));
+  if (!hasNoun) return 0;
+
+  if (h.startsWith("which") && ROLE_APPLY_VERBS.some((v) => h.includes(v))) return ROLE_TIER_PATTERN;
+  if (h.startsWith("select") && ROLE_SELECT_VERBS.some((v) => h.includes(v))) return ROLE_TIER_PATTERN;
+
+  return 0;
+}
+
+export type RoleHeaderMatch = {
+  header: string | null;
+  tier: number;
+  // Other headers that matched at the same tier. The leftmost wins; these are
+  // surfaced in the import summary so an ambiguous form is visible.
+  ambiguousWith: string[];
+};
+
 // Exported so /api/import can reject a file whose role column it cannot identify
-// before any row is written. Pass 2 replaces the body with tiered matching; the
-// signature is the seam.
-export function findRoleHeader(rowHeaders: string[]): string | null {
-  for (const variation of ROLE_VARIATIONS) {
-    const target = normalizeHeader(variation);
-    const matched = rowHeaders.find((header) => normalizeHeader(header) === target);
-    if (matched) return matched;
+// before any row is written, and warn when more than one column could be it.
+export function resolveRoleHeader(rowHeaders: string[]): RoleHeaderMatch {
+  let best: string | null = null;
+  let bestScore = 0;
+  const tied: string[] = [];
+
+  for (const header of rowHeaders) {
+    const score = scoreRoleHeader(header);
+    if (score === 0) continue;
+    if (score > bestScore) {
+      bestScore = score;
+      best = header;
+      tied.length = 0;
+    } else if (score === bestScore) {
+      tied.push(header);
+    }
   }
-  return null;
+
+  return { header: best, tier: bestScore, ambiguousWith: tied };
+}
+
+export function findRoleHeader(rowHeaders: string[]): string | null {
+  return resolveRoleHeader(rowHeaders).header;
 }
 
   export function normalizeData(rawData: any[], opportunity: string = ""): any[] {

@@ -1,4 +1,4 @@
-import { normalizeData, normalizeAmbassadorMatrixData, normalizeEboardData, parseRawCsv, detectCsvFormType, findRoleHeader } from "@/lib/parseCsv";
+import { normalizeData, normalizeAmbassadorMatrixData, normalizeEboardData, parseRawCsv, detectCsvFormType, resolveRoleHeader } from "@/lib/parseCsv";
 import { upsertApplicant } from "@/lib/upsert";
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
@@ -95,9 +95,11 @@ export async function POST(request: Request) {
    // collided on that key and overwrote each other. Fail the file instead, so a
    // rewording surfaces here rather than as bad rows. Scoped to the project
    // path: the E-Board and Ambassador normalizers read fixed keys of their own.
+   let roleAmbiguityWarning: string | null = null;
    if (formType !== "eboard" && formType !== "ambassador") {
      const headers = Object.keys(rawParsedData[0] ?? {});
-     if (!findRoleHeader(headers)) {
+     const roleMatch = resolveRoleHeader(headers);
+     if (!roleMatch.header) {
        return NextResponse.json(
          {
            error:
@@ -106,6 +108,13 @@ export async function POST(request: Request) {
          },
          { status: 400 }
        );
+     }
+     // More than one column looks like the role question. The leftmost is used;
+     // say so rather than picking silently, since the choice is a coin flip.
+     if (roleMatch.ambiguousWith.length > 0) {
+       roleAmbiguityWarning =
+         `More than one column looked like the role question. Used "${roleMatch.header}"; also matched: ` +
+         roleMatch.ambiguousWith.map((h) => `"${h}"`).join(", ");
      }
    }
 
@@ -122,6 +131,7 @@ export async function POST(request: Request) {
    let skipped = 0;
    
    const errors: string[] = [];
+   if (roleAmbiguityWarning) errors.push(roleAmbiguityWarning);
    
    for (const applicant of cleanData) {
      // skip records flagged invalid during normalization

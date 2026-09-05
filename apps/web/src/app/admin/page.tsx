@@ -9,6 +9,7 @@ import { getEmailTemplate } from "@/lib/emailTemplates";
 import ManageAccessModal from "@/components/ManageAccessModal";
 import { handleAuthFailure } from "@/lib/utils";
 import { MAX_INTERVIEW_ROLES } from "@/lib/interviewRoles";
+import { formatRoleForDisplay, shortenRoleValues } from "@/lib/roleDisplay";
 import { DELETE_APPLICATION_PHRASE, matchesDeletePhrase } from "@/lib/deleteConfirmation";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -257,6 +258,7 @@ function EmailDraftModal({
     role: app.role,
     opportunity: app.opportunity,
     roles: app.interview_roles,
+    track: app.track,
   });
 
   const [to, setTo] = useState(app.applicant.email);
@@ -1220,7 +1222,7 @@ function ApplicantModal({
                   if (activeTab !== a.id) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
                 }}
               >
-                {a.opportunity === boardOpportunity ? a.role : a.opportunity}
+                {a.opportunity === boardOpportunity ? formatRoleForDisplay(a.role, a.track) : a.opportunity}
               </button>
             ))}
           </div>
@@ -1799,7 +1801,7 @@ function ApplicantCard({
               className="truncate"
               style={{ fontSize: 12.5, color: "#9a98ab", fontWeight: 500 }}
             >
-              {app.role}
+              {formatRoleForDisplay(app.role, app.track)}
             </div>
           )}
           {showPrefers && (
@@ -2109,6 +2111,7 @@ function BulkInterviewEmailDialog({
         name: firstApp.applicant.name,
         role: firstApp.role,
         opportunity: firstApp.opportunity,
+        track: firstApp.track,
       })
     : { subject: "", body: "" };
 
@@ -2129,7 +2132,7 @@ function BulkInterviewEmailDialog({
 
   // Preview: fill subject/body for first app
   const previewData = firstApp
-    ? { name: firstApp.applicant.name, role: firstApp.role, opportunity: firstApp.opportunity }
+    ? { name: firstApp.applicant.name, role: formatRoleForDisplay(firstApp.role, firstApp.track), opportunity: firstApp.opportunity }
     : { name: "Recipient", role: "Role", opportunity: "Opportunity" };
   const previewSubject = fillTemplate(subject, previewData);
   const previewBody = fillTemplate(body, previewData);
@@ -2628,10 +2631,6 @@ export default function AdminPage() {
   const isAmbassadorBoard = hasAmbassadorTrack && !isEboardBoard && !isMatrixAmbassadorBoard;
   const isPositionFilterable = (!isAmbassadorBoard && applications.length > 0) || isEboardBoard;
 
-  function splitRoles(role: string): string[] {
-    return role.split(",").map((r) => r.trim()).filter(Boolean);
-  }
-
   const availablePositions = isPositionFilterable
     ? Array.from(
         new Set(
@@ -2641,7 +2640,7 @@ export default function AdminPage() {
                 [a.rawData?._teamPreference1, a.rawData?._teamPreference2, a.rawData?._teamPreference3]
                   .filter((p): p is string => Boolean(p))
               )
-            : applications.flatMap((a) => (a.role ? splitRoles(a.role) : []))
+            : applications.flatMap((a) => (a.role ? shortenRoleValues(a.role, a.track) : []))
         )
       ).sort()
     : [];
@@ -3004,7 +3003,7 @@ export default function AdminPage() {
         const prefs = [a.rawData?._teamPreference1, a.rawData?._teamPreference2, a.rawData?._teamPreference3];
         if (!prefs.some((p) => p === selectedPosition)) return false;
       } else {
-        if (!splitRoles(a.role ?? "").includes(selectedPosition)) return false;
+        if (!shortenRoleValues(a.role, a.track).includes(selectedPosition)) return false;
       }
     }
     return true;
