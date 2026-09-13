@@ -66,3 +66,44 @@ export function formatRoleForDisplay(
 ): string {
   return shortenRoleValues(role, track).join(", ");
 }
+
+// ── Interview role options ────────────────────────────────────────────────────
+//
+// What a reviewer may record as "interviewing for", derived from the applicant's
+// own stored selections rather than a list per form. Used by the picker, the
+// drag-to-Interviewing path, and the PATCH validation on the server, so client
+// and server can never disagree about what is selectable.
+//
+//   Ambassador  → the ranked preferences the matrix form wrote to rawData
+//                 (_teamPreference1/2/3), in rank order. Unchanged behaviour.
+//   Everything  → each project in the role cell. The full string is the value
+//   else          (it is what gets stored and validated); the label is short.
+//
+// Options are read at request time; nothing is written to rawData or role.
+
+export type InterviewRoleOption = { value: string; label: string };
+
+const RANK_PREFIX = ["1st", "2nd", "3rd"] as const;
+
+export function getInterviewRoleOptions(app: {
+  track: string;
+  role: string;
+  rawData: Record<string, unknown> | null | undefined;
+}): InterviewRoleOption[] {
+  if (isExemptTrack(app.track)) {
+    const raw = app.rawData ?? {};
+    const prefs = [raw._teamPreference1, raw._teamPreference2, raw._teamPreference3];
+    const options: InterviewRoleOption[] = [];
+    prefs.forEach((p, i) => {
+      if (typeof p === "string" && p.trim()) {
+        options.push({ value: p.trim(), label: `${RANK_PREFIX[i]}: ${p.trim()}` });
+      }
+    });
+    return options;
+  }
+
+  return splitRoleValues(app.role).map((value) => ({
+    value,
+    label: shortenRoleName(value),
+  }));
+}

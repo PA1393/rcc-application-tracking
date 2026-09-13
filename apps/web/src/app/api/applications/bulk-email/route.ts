@@ -12,6 +12,7 @@ import {
 } from "@/lib/emailService";
 import { getEmailTemplate } from "@/lib/emailTemplates";
 import { formatRoleList } from "@/lib/interviewRoles";
+import { formatRoleForDisplay } from "@/lib/roleDisplay";
 
 export const maxDuration = 60; // Vercel Hobby ceiling
 
@@ -193,6 +194,14 @@ export async function POST(request: Request) {
       roles: app.interview_roles ?? [],
       track: app.track,
     };
+    // getEmailTemplate shortens role names itself, per track. The local fill()
+    // below does not, so override text gets the display form explicitly — each
+    // path shortens exactly once. Ambassador names are exempt in the helper.
+    const overrideData = {
+      ...templateData,
+      role: formatRoleForDisplay(app.role, app.track),
+      roles: templateData.roles.map((r) => formatRoleForDisplay(r, app.track)),
+    };
 
     let subject: string;
     let body: string;
@@ -201,10 +210,10 @@ export async function POST(request: Request) {
       // Use template as fallback for whichever isn't overridden
       const template = getEmailTemplate("Interviewing", templateData);
       subject = subjectOverride !== undefined
-        ? fill(stripCrlf(subjectOverride), templateData)
+        ? fill(stripCrlf(subjectOverride), overrideData)
         : template.subject;
       body = bodyOverride !== undefined
-        ? fill(bodyOverride, templateData)
+        ? fill(bodyOverride, overrideData)
         : template.body;
     } else {
       const template = getEmailTemplate("Interviewing", templateData);

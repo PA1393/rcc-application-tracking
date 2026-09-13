@@ -9,7 +9,7 @@ import { getEmailTemplate } from "@/lib/emailTemplates";
 import ManageAccessModal from "@/components/ManageAccessModal";
 import { handleAuthFailure } from "@/lib/utils";
 import { MAX_INTERVIEW_ROLES } from "@/lib/interviewRoles";
-import { formatRoleForDisplay, shortenRoleValues } from "@/lib/roleDisplay";
+import { formatRoleForDisplay, shortenRoleValues, getInterviewRoleOptions, type InterviewRoleOption } from "@/lib/roleDisplay";
 import { DELETE_APPLICATION_PHRASE, matchesDeletePhrase } from "@/lib/deleteConfirmation";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -451,31 +451,34 @@ function EmailDraftModal({
 // Rendered both inside the applicant modal's status-change overlay and inside
 // the page-level DropRolePickerModal (below), so a drag into Interviewing
 // surfaces the same picker with the same constraints as the modal path.
+// Options come from getInterviewRoleOptions: `value` is what is stored and
+// validated (a ranked preference, or the full project string), `label` is what
+// the reviewer sees ("1st: Consulting Co-Lead", or a short project name).
 function InterviewRolePicker({
   options,
   selected,
   onChange,
 }: {
-  options: Array<{ rank: 1 | 2 | 3; role: string }>;
+  options: InterviewRoleOption[];
   selected: string[];
   onChange: (next: string[]) => void;
 }) {
   return (
     <div className="flex gap-2 flex-wrap">
-      {options.map((p) => {
-        const picked = selected.includes(p.role);
+      {options.map((o) => {
+        const picked = selected.includes(o.value);
         const atLimit = selected.length >= MAX_INTERVIEW_ROLES;
         const disabled = !picked && atLimit;
         return (
           <button
-            key={p.rank}
+            key={o.value}
             type="button"
             disabled={disabled}
             onClick={() =>
               onChange(
-                selected.includes(p.role)
-                  ? selected.filter((r) => r !== p.role)
-                  : [...selected, p.role]
+                selected.includes(o.value)
+                  ? selected.filter((r) => r !== o.value)
+                  : [...selected, o.value]
               )
             }
             className="transition-colors disabled:cursor-not-allowed"
@@ -492,7 +495,7 @@ function InterviewRolePicker({
               color: picked ? "#a78bfa" : "#A09BB5",
             }}
           >
-            {RANK_LABELS[p.rank]}: {p.role}
+            {o.label}
           </button>
         );
       })}
@@ -654,10 +657,11 @@ function ApplicantModal({
   }, [onClose, pendingStatus, emailDraftStatus, deleteOpen, deleting, editingRoles, savingRoles]);
 
   const activeApp = allApps.find((a) => a.id === activeTab) ?? initialApp;
-  // E-Board rows also carry track "Ambassador" but have no ranked preference keys,
-  // so the preference list is what actually identifies the matrix cohort.
-  const interviewRoleOptions = getRankedPreferences(activeApp.rawData);
-  const canPickInterviewRoles = activeApp.track === "Ambassador" && interviewRoleOptions.length > 0;
+  // Track-aware: ranked preferences for Ambassador rows, the applicant's own
+  // projects for everything else. E-Board rows carry the Ambassador track but no
+  // preferences, so they resolve to no options and get no picker.
+  const interviewRoleOptions = getInterviewRoleOptions(activeApp);
+  const canPickInterviewRoles = interviewRoleOptions.length > 0;
   const visibleFields = visibleNoteFields(activeApp);
   // Mirrors the server's 409 guard: a Placement keys on applicant+track+season and
   // holds no reference back to the application, so deleting an accepted one would
@@ -1094,6 +1098,7 @@ function ApplicantModal({
               {!editingRoles && activeApp.interview_roles.map((role) => (
                 <span
                   key={role}
+                  title={role}
                   style={{
                     fontSize: 11,
                     fontWeight: 500,
@@ -1104,7 +1109,7 @@ function ApplicantModal({
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {role}
+                  {formatRoleForDisplay(role, activeApp.track)}
                 </span>
               ))}
 
@@ -1817,7 +1822,7 @@ function ApplicantCard({
               className="truncate"
               style={{ fontSize: 11.5, color: "#a78bfa", fontWeight: 500, marginTop: 2 }}
             >
-              {`Interviewing for: ${app.interview_roles.join(", ")}`}
+              {`Interviewing for: ${app.interview_roles.map((r) => formatRoleForDisplay(r, app.track)).join(", ")}`}
             </div>
           )}
         </div>
@@ -2327,7 +2332,7 @@ function DropRolePickerModal({
   onCancel: () => void;
   submitting: boolean;
 }) {
-  const options = getRankedPreferences(app.rawData);
+  const options = getInterviewRoleOptions(app);
   const [selected, setSelected] = useState<string[]>([]);
 
   useEffect(() => {
@@ -2686,12 +2691,11 @@ export default function AdminPage() {
       // stays behind the modal's confirmation flow. The column also refuses drops.
       if (newStatus === "Accepted") return;
 
-      // Ambassador applicants with ranked preferences get the same role picker
-      // the modal shows before the status change commits. E-Board rows (no
-      // _teamPreference keys) and non-Ambassador rows fall through.
+      // Applicants with recordable role options get the same picker the modal
+      // shows before the status change commits. E-Board rows (Ambassador track,
+      // no preferences) resolve to no options and fall through.
       if (newStatus === "Interviewing"
-          && app.track === "Ambassador"
-          && getRankedPreferences(app.rawData).length > 0) {
+          && getInterviewRoleOptions(app).length > 0) {
         setDropPending(app);
         return;
       }

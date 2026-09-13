@@ -104,14 +104,17 @@ export function getEmailTemplate(status: string, data: TemplateData): EmailTempl
   const selected = (data.roles ?? []).map((r) => r.trim()).filter(Boolean);
   const useRoles = status === "Interviewing" && selected.length > 0;
 
+  // Applicants picked these names off the form, so the short label is the part
+  // they recognise: "the LegalBee position", not the full pitch. Stored
+  // interview_roles hold the full string; shorten here, per track — Ambassador
+  // role names are exempt inside the helper and come through unchanged.
+  const selectedForDisplay = selected.map((r) => formatRoleForDisplay(r, data.track));
+
   const filled: FilledData = {
     name: data.name,
-    // Applicants picked these names off the form, so the short label is the
-    // part they recognise: "the LegalBee position", not the full pitch.
-    // interview_roles (selected[0]) are Ambassador-only and stay whole.
-    role: useRoles ? selected[0] : formatRoleForDisplay(data.role, data.track),
+    role: useRoles ? selectedForDisplay[0] : formatRoleForDisplay(data.role, data.track),
     opportunity: data.opportunity,
-    roles: formatRoleList(selected),
+    roles: formatRoleList(selectedForDisplay),
   };
 
   // Bodies are not length-bound (MAX_BODY_LEN is 50,000) and keep the full list.

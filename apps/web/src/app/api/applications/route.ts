@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { acceptApplicant } from "@/lib/placement";
 import { auth } from "@/lib/auth";
 import { normalizeInterviewRoles } from "@/lib/interviewRoles";
+import { getInterviewRoleOptions } from "@/lib/roleDisplay";
 import { DELETE_APPLICATION_PHRASE, matchesDeletePhrase } from "@/lib/deleteConfirmation";
 
 // GET /api/applications?opportunities=true      → distinct opportunity list
@@ -88,36 +89,41 @@ export async function PATCH(request: Request) {
     }
     normalizedRoles = result.value;
 
-    // Guardrail: interview roles must be Ambassador-track and must match the
-    // applicant's own ranked preferences. The UI already constrains this, but
-    // a hand-crafted request could still submit any string. Skipped for the
+    // Guardrail: interview roles must be among the applicant's own recorded
+    // options — ranked preferences for Ambassador rows, the projects in the
+    // role cell for everything else. The UI already constrains this, but a
+    // hand-crafted request could still submit any string. Skipped for the
     // empty case (clearing roles is always allowed).
     if (normalizedRoles.length > 0) {
       const row = await prisma.application.findUnique({
         where: { id },
-        select: { track: true, rawData: true },
+        select: { track: true, rawData: true, role: true },
       });
       if (!row) {
         return NextResponse.json({ error: "Application not found." }, { status: 404 });
       }
-      if (row.track !== "Ambassador") {
+      const allowed = new Set(
+        getInterviewRoleOptions({
+          track: row.track,
+          role: row.role,
+          rawData: (row.rawData ?? null) as Record<string, unknown> | null,
+        }).map((o) => o.value)
+      );
+      // E-Board rows carry the Ambassador track but no ranked preferences, so
+      // they land here — the same 400 they received before via the membership
+      // check below, now with a reason that names the cause.
+      if (allowed.size === 0) {
         return NextResponse.json(
-          { error: "Interview roles are only supported for Ambassador applications." },
+          { error: "This application has no recorded role options." },
           { status: 400 }
         );
       }
-      const rawData = (row.rawData ?? {}) as Record<string, unknown>;
-      const allowed = new Set(
-        [rawData._teamPreference1, rawData._teamPreference2, rawData._teamPreference3]
-          .filter((r): r is string => typeof r === "string" && r.trim().length > 0)
-          .map((r) => r.trim())
-      );
       const invalid = normalizedRoles.filter((r) => !allowed.has(r));
       if (invalid.length > 0) {
         return NextResponse.json(
           {
             error:
-              "Interview roles must be among the applicant's recorded preferences.",
+              "Interview roles must be among the applicant's recorded options.",
             invalidRoles: invalid,
             allowedRoles: [...allowed],
           },
