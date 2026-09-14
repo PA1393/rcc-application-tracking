@@ -1,5 +1,6 @@
 import { formatRoleList, splitRoleValues } from "./interviewRoles";
 import { formatRoleForDisplay } from "./roleDisplay";
+import { buildSchedulingBlock } from "./interviewScheduling";
 
 type TemplateData = {
   name: string;
@@ -21,6 +22,7 @@ type FilledData = {
   role: string;
   opportunity: string;
   roles: string;
+  scheduling: string;
 };
 
 function fill(template: string, data: FilledData): string {
@@ -28,7 +30,8 @@ function fill(template: string, data: FilledData): string {
     .replace(/\{\{name\}\}/g, data.name)
     .replace(/\{\{role\}\}/g, data.role)
     .replace(/\{\{opportunity\}\}/g, data.opportunity)
-    .replace(/\{\{roles\}\}/g, data.roles);
+    .replace(/\{\{roles\}\}/g, data.roles)
+    .replace(/\{\{scheduling\}\}/g, data.scheduling);
 }
 
 const TEMPLATES: Record<string, { subject: string; body: string }> = {
@@ -77,7 +80,7 @@ const INTERVIEWING_BODY_WITH_ROLES = `Hi {{name}},
 
 Thank you for your interest in RCC's {{opportunity}}. We were impressed by your application and would like to invite you to interview for {{roles}}.
 
-We'll follow up shortly with scheduling details. In the meantime, please don't hesitate to reach out if you have any questions.
+{{scheduling}}
 
 Best,
 RCC Recruiting Team`;
@@ -115,6 +118,9 @@ export function getEmailTemplate(status: string, data: TemplateData): EmailTempl
     role: useRoles ? selectedForDisplay[0] : formatRoleForDisplay(data.role, data.track),
     opportunity: data.opportunity,
     roles: formatRoleList(selectedForDisplay),
+    // Booking links for roles that have one (Consulting), otherwise the
+    // original follow-up sentence — so bodies without links are unchanged.
+    scheduling: buildSchedulingBlock(selected, data.track),
   };
 
   // Bodies are not length-bound (MAX_BODY_LEN is 50,000) and keep the full list.

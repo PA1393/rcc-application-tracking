@@ -13,6 +13,7 @@ import {
 import { getEmailTemplate } from "@/lib/emailTemplates";
 import { formatRoleList } from "@/lib/interviewRoles";
 import { formatRoleForDisplay } from "@/lib/roleDisplay";
+import { buildSchedulingBlock } from "@/lib/interviewScheduling";
 
 export const maxDuration = 60; // Vercel Hobby ceiling
 
@@ -22,13 +23,14 @@ const MAX_BATCH = 10;
 // modifying that file. Used to apply per-recipient placeholders to override text.
 function fill(
   template: string,
-  data: { name: string; role: string; opportunity: string; roles?: string[] }
+  data: { name: string; role: string; opportunity: string; roles?: string[]; scheduling?: string }
 ): string {
   return template
     .replace(/\{\{name\}\}/g, data.name)
     .replace(/\{\{role\}\}/g, data.role)
     .replace(/\{\{opportunity\}\}/g, data.opportunity)
-    .replace(/\{\{roles\}\}/g, formatRoleList(data.roles ?? []));
+    .replace(/\{\{roles\}\}/g, formatRoleList(data.roles ?? []))
+    .replace(/\{\{scheduling\}\}/g, data.scheduling ?? "");
 }
 
 type BulkEmailResult =
@@ -128,9 +130,10 @@ export async function POST(request: Request) {
   // names so the reviewer can either fix those applicants' roles or edit
   // {{roles}} out of the message. Rate-limit slots are already reserved and
   // not refunded here — matches the existing over-consumption policy above.
-  const usesRolesPlaceholder =
-    (subjectOverride?.includes("{{roles}}") ?? false) ||
-    (bodyOverride?.includes("{{roles}}") ?? false);
+  // {{scheduling}} is built from the same roles, so it is guarded the same way.
+  const usesRolesPlaceholder = ["{{roles}}", "{{scheduling}}"].some(
+    (p) => (subjectOverride?.includes(p) ?? false) || (bodyOverride?.includes(p) ?? false)
+  );
 
   if (usesRolesPlaceholder) {
     const emptyRoleTargets = fetched.filter(
@@ -201,6 +204,8 @@ export async function POST(request: Request) {
       ...templateData,
       role: formatRoleForDisplay(app.role, app.track),
       roles: templateData.roles.map((r) => formatRoleForDisplay(r, app.track)),
+      // Built from the stored full strings — the map is keyed on those.
+      scheduling: buildSchedulingBlock(templateData.roles, app.track),
     };
 
     let subject: string;

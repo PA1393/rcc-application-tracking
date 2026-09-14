@@ -8,7 +8,8 @@ import ImportButton, {
 import { getEmailTemplate } from "@/lib/emailTemplates";
 import ManageAccessModal from "@/components/ManageAccessModal";
 import { handleAuthFailure } from "@/lib/utils";
-import { MAX_INTERVIEW_ROLES } from "@/lib/interviewRoles";
+import { MAX_INTERVIEW_ROLES, formatRoleList } from "@/lib/interviewRoles";
+import { buildSchedulingBlock } from "@/lib/interviewScheduling";
 import { formatRoleForDisplay, getInterviewRoleOptions, getPositionFilterValues, type InterviewRoleOption } from "@/lib/roleDisplay";
 import { DELETE_APPLICATION_PHRASE, matchesDeletePhrase } from "@/lib/deleteConfirmation";
 
@@ -2090,12 +2091,18 @@ const stripPillStyle: React.CSSProperties = {
 
 // ── Bulk Interview Email Dialog ───────────────────────────────────────────────
 
-// Local fill helper — mirrors emailTemplates.ts internal fill() without modifying that file.
-function fillTemplate(template: string, data: { name: string; role: string; opportunity: string }): string {
+// Local fill helper — mirrors the server's bulk-email fill() so the preview
+// shows what the first recipient will actually receive.
+function fillTemplate(
+  template: string,
+  data: { name: string; role: string; opportunity: string; roles: string[]; scheduling: string }
+): string {
   return template
     .replace(/\{\{name\}\}/g, data.name)
     .replace(/\{\{role\}\}/g, data.role)
-    .replace(/\{\{opportunity\}\}/g, data.opportunity);
+    .replace(/\{\{opportunity\}\}/g, data.opportunity)
+    .replace(/\{\{roles\}\}/g, formatRoleList(data.roles))
+    .replace(/\{\{scheduling\}\}/g, data.scheduling);
 }
 
 const EMAIL_RE_CLIENT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -2137,8 +2144,14 @@ function BulkInterviewEmailDialog({
 
   // Preview: fill subject/body for first app
   const previewData = firstApp
-    ? { name: firstApp.applicant.name, role: formatRoleForDisplay(firstApp.role, firstApp.track), opportunity: firstApp.opportunity }
-    : { name: "Recipient", role: "Role", opportunity: "Opportunity" };
+    ? {
+        name: firstApp.applicant.name,
+        role: formatRoleForDisplay(firstApp.role, firstApp.track),
+        opportunity: firstApp.opportunity,
+        roles: (firstApp.interview_roles ?? []).map((r) => formatRoleForDisplay(r, firstApp.track)),
+        scheduling: buildSchedulingBlock(firstApp.interview_roles ?? [], firstApp.track),
+      }
+    : { name: "Recipient", role: "Role", opportunity: "Opportunity", roles: [], scheduling: "" };
   const previewSubject = fillTemplate(subject, previewData);
   const previewBody = fillTemplate(body, previewData);
 
@@ -2150,8 +2163,9 @@ function BulkInterviewEmailDialog({
   // If the message references {{roles}}, any recipient without interview_roles
   // would render a broken sentence. Preemptively block the send here; the
   // server enforces the same rule.
-  const usesRolesPlaceholder =
-    subject.includes("{{roles}}") || body.includes("{{roles}}");
+  const usesRolesPlaceholder = ["{{roles}}", "{{scheduling}}"].some(
+    (p) => subject.includes(p) || body.includes(p)
+  );
   const missingRoles = selectedApps.filter(
     (a) => (a.interview_roles?.length ?? 0) === 0
   );
@@ -2230,7 +2244,8 @@ function BulkInterviewEmailDialog({
               Placeholders <code style={{ color: "#9a98ab" }}>{"{{name}}"}</code>,{" "}
               <code style={{ color: "#9a98ab" }}>{"{{role}}"}</code>,{" "}
               <code style={{ color: "#9a98ab" }}>{"{{opportunity}}"}</code>,{" "}
-              <code style={{ color: "#9a98ab" }}>{"{{roles}}"}</code> are filled per recipient.
+              <code style={{ color: "#9a98ab" }}>{"{{roles}}"}</code>,{" "}
+              <code style={{ color: "#9a98ab" }}>{"{{scheduling}}"}</code> are filled per recipient.
             </p>
           </div>
 
