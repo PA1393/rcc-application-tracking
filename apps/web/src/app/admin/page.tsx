@@ -9,7 +9,7 @@ import { getEmailTemplate } from "@/lib/emailTemplates";
 import ManageAccessModal from "@/components/ManageAccessModal";
 import { handleAuthFailure } from "@/lib/utils";
 import { MAX_INTERVIEW_ROLES } from "@/lib/interviewRoles";
-import { formatRoleForDisplay, shortenRoleValues, getInterviewRoleOptions, type InterviewRoleOption } from "@/lib/roleDisplay";
+import { formatRoleForDisplay, getInterviewRoleOptions, getPositionFilterValues, type InterviewRoleOption } from "@/lib/roleDisplay";
 import { DELETE_APPLICATION_PHRASE, matchesDeletePhrase } from "@/lib/deleteConfirmation";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -2645,7 +2645,7 @@ export default function AdminPage() {
                 [a.rawData?._teamPreference1, a.rawData?._teamPreference2, a.rawData?._teamPreference3]
                   .filter((p): p is string => Boolean(p))
               )
-            : applications.flatMap((a) => (a.role ? shortenRoleValues(a.role, a.track) : []))
+            : applications.flatMap((a) => getPositionFilterValues(a))
         )
       ).sort()
     : [];
@@ -3007,7 +3007,7 @@ export default function AdminPage() {
         const prefs = [a.rawData?._teamPreference1, a.rawData?._teamPreference2, a.rawData?._teamPreference3];
         if (!prefs.some((p) => p === selectedPosition)) return false;
       } else {
-        if (!shortenRoleValues(a.role, a.track).includes(selectedPosition)) return false;
+        if (!getPositionFilterValues(a).includes(selectedPosition)) return false;
       }
     }
     return true;

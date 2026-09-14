@@ -85,6 +85,49 @@ export type InterviewRoleOption = { value: string; label: string };
 
 const RANK_PREFIX = ["1st", "2nd", "3rd"] as const;
 
+// ── Consulting: projects implied by role preferences ──────────────────────────
+//
+// The Consulting form asks for projects (multi-select, stored in `role`) and,
+// separately, a 1st and 2nd role preference. Some applicants answered the
+// project question narrowly and then chose a role on a project they hadn't
+// ticked, so `role` alone under-reports what they applied to. The role
+// preferences are already in rawData under their form header; read them here.
+//
+// Role values are "<project short name> – <role>", separated by an EN DASH
+// (U+2013) with spaces — not a hyphen; "Front-End" contains a hyphen and must
+// not split. The short name is not derivable from the full project string (MMF
+// is an acronym), so the map is explicit. Values must equal the form's project
+// option text exactly: interview_roles store full strings, never short names.
+// An unknown prefix is ignored rather than guessed.
+const ROLE_PREF_SEPARATOR = " \u2013 ";
+const ROLE_PREF_KEY = /role preference/i;
+const ROLE_PREF_NONE = /\bnone\b/i;
+
+const CONSULTING_PROJECT_BY_ROLE_PREFIX: Record<string, string> = {
+  "AI Valley": "AI Valley (Front-End & UI/UX Consulting)",
+  "MMF":       "Musical Memories Foundation (Marketing, Multimedia & Outreach)",
+  "OCLS":      "Spartan OCLS (Web Platform, UI/UX & Community Infrastructure)",
+};
+
+function projectsImpliedByRolePreferences(
+  rawData: Record<string, unknown> | null | undefined
+): string[] {
+  if (!rawData) return [];
+  const implied: string[] = [];
+  for (const key of Object.keys(rawData)) {
+    if (!ROLE_PREF_KEY.test(key)) continue;
+    const value = rawData[key];
+    if (typeof value !== "string") continue;
+    const text = value.trim();
+    if (!text || ROLE_PREF_NONE.test(text)) continue;
+    const sep = text.indexOf(ROLE_PREF_SEPARATOR);
+    if (sep <= 0) continue;
+    const project = CONSULTING_PROJECT_BY_ROLE_PREFIX[text.slice(0, sep).trim()];
+    if (project && !implied.includes(project)) implied.push(project);
+  }
+  return implied;
+}
+
 export function getInterviewRoleOptions(app: {
   track: string;
   role: string;
@@ -102,8 +145,25 @@ export function getInterviewRoleOptions(app: {
     return options;
   }
 
-  return splitRoleValues(app.role).map((value) => ({
-    value,
-    label: shortenRoleName(value),
-  }));
+  // Union, never subtraction: the projects the applicant ticked come first, in
+  // their stored order; projects implied by role preferences are appended.
+  const values = splitRoleValues(app.role);
+  for (const project of projectsImpliedByRolePreferences(app.rawData)) {
+    if (!values.includes(project)) values.push(project);
+  }
+  return values.map((value) => ({ value, label: shortenRoleName(value) }));
+}
+
+// What the board's position filter lists and matches on. Kept in step with the
+// picker so an applicant who is pickable for a project is also findable under
+// it. Ambassador-track rows keep the role-based path: E-Board boards are
+// position-filterable but have no ranked preferences, so the picker helper
+// would return nothing for them.
+export function getPositionFilterValues(app: {
+  track: string;
+  role: string;
+  rawData: Record<string, unknown> | null | undefined;
+}): string[] {
+  if (isExemptTrack(app.track)) return shortenRoleValues(app.role, app.track);
+  return getInterviewRoleOptions(app).map((o) => o.label);
 }
