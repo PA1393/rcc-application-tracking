@@ -2089,7 +2089,7 @@ const stripPillStyle: React.CSSProperties = {
   outline: "none",
 };
 
-// ── Bulk Interview Email Dialog ───────────────────────────────────────────────
+// ── Bulk Email Dialog (Interviewing / Accepted) ──────────────────────────────
 
 // Local fill helper — mirrors the server's bulk-email fill() so the preview
 // shows what the first recipient will actually receive.
@@ -2107,38 +2107,44 @@ function fillTemplate(
 
 const EMAIL_RE_CLIENT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function BulkInterviewEmailDialog({
+type BulkEmailStatus = "Interviewing" | "Accepted";
+
+// Accepted default subject names the opportunity, never {{role}}: for
+// Ambassador rows `role` is the applicant's first form preference, not what
+// they were accepted for. Same string as the multi-role Accepted subject in
+// emailTemplates.ts. The body starts blank on purpose — the stock Accepted
+// body names {{role}} too — so nothing goes out that the reviewer did not type.
+const ACCEPTED_BULK_DEFAULT_SUBJECT = "Congratulations! You've been selected — {{opportunity}}";
+
+function BulkEmailDialog({
+  status,
   selectedApps,
   onSend,
   onClose,
 }: {
+  status: BulkEmailStatus;
   selectedApps: Application[];
   onSend: (subject: string | null, body: string | null) => void;
   onClose: () => void;
 }) {
-  // Compute default subject/body from template (first app for preview)
   const firstApp = selectedApps[0];
-  const defaultTemplate = firstApp
-    ? getEmailTemplate("Interviewing", {
-        name: firstApp.applicant.name,
-        role: firstApp.role,
-        opportunity: firstApp.opportunity,
-        track: firstApp.track,
-      })
-    : { subject: "", body: "" };
 
-  // Use the unfilled template as editable defaults so placeholders are preserved
-  const rawTemplate = getEmailTemplate("Interviewing", {
-    name: "{{name}}",
-    role: "{{role}}",
-    opportunity: "{{opportunity}}",
-  });
+  // Interviewing: the unfilled template as editable defaults so placeholders are
+  // preserved. Accepted: opportunity-based subject, blank body (see above).
+  const rawTemplate =
+    status === "Interviewing"
+      ? getEmailTemplate("Interviewing", {
+          name: "{{name}}",
+          role: "{{role}}",
+          opportunity: "{{opportunity}}",
+        })
+      : { subject: ACCEPTED_BULK_DEFAULT_SUBJECT, body: "" };
 
   const [subject, setSubject] = useState(rawTemplate.subject);
   const [body, setBody] = useState(rawTemplate.body);
 
   // Client-side counts (UX preview only — server is authoritative)
-  const alreadySent = selectedApps.filter((a) => !!a.interview_invite_sent).length;
+  const alreadySent = selectedApps.filter((a) => !!statusToSentAt(status, a)).length;
   const noEmail = selectedApps.filter((a) => !EMAIL_RE_CLIENT.test(a.applicant.email)).length;
   const sendable = selectedApps.length - alreadySent - noEmail;
 
@@ -2155,10 +2161,14 @@ function BulkInterviewEmailDialog({
   const previewSubject = fillTemplate(subject, previewData);
   const previewBody = fillTemplate(body, previewData);
 
-  // When the reviewer hasn't edited either field, we omit both overrides and
-  // let the server pick the per-recipient template branch (roles vs single).
+  // Interviewing only: when the reviewer hasn't edited either field, we omit
+  // both overrides and let the server pick the per-recipient template branch
+  // (roles vs single). Accepted always sends both overrides — the server
+  // refuses an Accepted batch without them.
   const isPristine =
-    subject === rawTemplate.subject && body === rawTemplate.body;
+    status === "Interviewing" &&
+    subject === rawTemplate.subject &&
+    body === rawTemplate.body;
 
   // If the message references {{roles}}, any recipient without interview_roles
   // would render a broken sentence. Preemptively block the send here; the
@@ -2173,7 +2183,8 @@ function BulkInterviewEmailDialog({
     !isPristine && usesRolesPlaceholder && missingRoles.length > 0;
 
   const rateLimitWarning = sendable > 10;
-  const canSend = sendable > 0 && !rateLimitWarning && !rolesGuardFail;
+  const hasText = subject.trim().length > 0 && body.trim().length > 0;
+  const canSend = sendable > 0 && hasText && !rateLimitWarning && !rolesGuardFail;
 
   return (
     <div
@@ -2186,7 +2197,9 @@ function BulkInterviewEmailDialog({
       >
         {/* Header */}
         <div className="px-6 py-5 shrink-0" style={{ borderBottom: "0.5px solid rgba(139,130,190,0.08)" }}>
-          <h3 style={{ fontSize: 15, fontWeight: 600, color: "#EAE8F2" }}>Send interview emails</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: "#EAE8F2" }}>
+            {status === "Accepted" ? "Send acceptance emails" : "Send interview emails"}
+          </h3>
         </div>
 
         {/* Body */}
@@ -2237,6 +2250,7 @@ function BulkInterviewEmailDialog({
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={8}
+              placeholder={status === "Accepted" ? "Paste the acceptance email body here. It is sent exactly as written." : undefined}
               className={modalInputCls}
               style={{ ...modalInputStyle, resize: "vertical" }}
             />
@@ -2894,7 +2908,7 @@ export default function AdminPage() {
   );
 
   const handleBulkEmail = useCallback(
-    async (subject: string | null, body: string | null) => {
+    async (status: BulkEmailStatus, subject: string | null, body: string | null) => {
       const ids = [...selectedIds];
       if (ids.length === 0) return;
 
@@ -2903,7 +2917,11 @@ export default function AdminPage() {
       try {
         // Pristine dialog sends omit subject/body so the server picks the
         // per-recipient template branch (roles vs single) via getEmailTemplate.
-        const payload: { ids: string[]; subject?: string; body?: string } = { ids };
+        // Accepted sends always carry both (the dialog never reports pristine).
+        const payload: { ids: string[]; status: BulkEmailStatus; subject?: string; body?: string } = {
+          ids,
+          status,
+        };
         if (subject !== null) payload.subject = subject;
         if (body !== null) payload.body = body;
 
@@ -2950,7 +2968,7 @@ export default function AdminPage() {
           return next;
         });
 
-        // Refetch to sync interview_invite_sent timestamps
+        // Refetch to sync the sent timestamps for this status
         fetchApps();
 
         const parts: string[] = [];
@@ -3029,6 +3047,17 @@ export default function AdminPage() {
   });
 
   const byStatus = (status: Status) => filtered.filter((a) => a.status === status);
+
+  // Which status the bulk email button would send for: all selected must be
+  // Interviewing, or all Accepted. Shared by the button, the dialog, and the
+  // send handler so they can never disagree. The server re-checks per row.
+  const bulkEmailStatus: BulkEmailStatus | null = (() => {
+    const selectedApps = applications.filter((a) => selectedIds.has(a.id));
+    if (selectedApps.length === 0) return null;
+    if (selectedApps.every((a) => a.status === "Interviewing")) return "Interviewing";
+    if (selectedApps.every((a) => a.status === "Accepted")) return "Accepted";
+    return null;
+  })();
 
   return (
     <main
@@ -3434,13 +3463,12 @@ export default function AdminPage() {
           >
             Move to Rejected
           </button>
-          {/* Send interview emails button — only active when ALL selected are Interviewing */}
+          {/* Send emails button — only active when ALL selected share a status
+              this route can send for (all Interviewing, or all Accepted) */}
           {(() => {
-            const selectedApps = applications.filter((a) => selectedIds.has(a.id));
-            const allInterviewing = selectedApps.length > 0 && selectedApps.every((a) => a.status === "Interviewing");
-            const disabled = !allInterviewing || isBulkUpdating || isBulkSending;
-            const tooltipText = !allInterviewing
-              ? "Only available when all selected applicants are in Interviewing"
+            const disabled = bulkEmailStatus === null || isBulkUpdating || isBulkSending;
+            const tooltipText = bulkEmailStatus === null
+              ? "Only available when all selected applicants are in Interviewing, or all are in Accepted"
               : isBulkSending
               ? "Sending…"
               : undefined;
@@ -3471,7 +3499,11 @@ export default function AdminPage() {
                   (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.10)";
                 }}
               >
-                {isBulkSending ? "Sending…" : "Send interview emails…"}
+                {isBulkSending
+                  ? "Sending…"
+                  : bulkEmailStatus === "Accepted"
+                  ? "Send acceptance emails…"
+                  : "Send interview emails…"}
               </button>
             );
           })()}
@@ -3531,11 +3563,12 @@ export default function AdminPage() {
         <ManageAccessModal onClose={() => setShowAccessModal(false)} />
       )}
 
-      {/* Bulk interview email dialog */}
-      {showBulkEmailDialog && (
-        <BulkInterviewEmailDialog
+      {/* Bulk email dialog (interview invites or acceptances) */}
+      {showBulkEmailDialog && bulkEmailStatus !== null && (
+        <BulkEmailDialog
+          status={bulkEmailStatus}
           selectedApps={applications.filter((a) => selectedIds.has(a.id))}
-          onSend={handleBulkEmail}
+          onSend={(subject, body) => handleBulkEmail(bulkEmailStatus, subject, body)}
           onClose={() => setShowBulkEmailDialog(false)}
         />
       )}
