@@ -19,6 +19,11 @@ export const maxDuration = 60; // Vercel Hobby ceiling
 
 const MAX_BATCH = 10;
 
+// Statuses this route can send for. Omitting `status` means Interviewing, so
+// the original client contract is unchanged.
+const BULK_EMAIL_STATUSES = ["Interviewing", "Accepted"] as const;
+type BulkEmailStatus = (typeof BULK_EMAIL_STATUSES)[number];
+
 // Small fill helper — mirrors emailTemplates.ts's internal fill() without
 // modifying that file. Used to apply per-recipient placeholders to override text.
 function fill(
@@ -39,16 +44,27 @@ type BulkEmailResult =
   | { id: string; ok: false; error: "server-error" };
 
 // POST /api/applications/bulk-email
-// Body: { ids: string[], subject?: string, body?: string }
+// Body: { ids: string[], status?: "Interviewing" | "Accepted", subject?: string, body?: string }
 export async function POST(request: Request) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
 
   const payload = (await request.json()) as {
     ids?: unknown;
+    status?: unknown;
     subject?: unknown;
     body?: unknown;
   };
+
+  // ── Validate status ──────────────────────────────────────────────────────
+  const requestedStatus = payload.status === undefined ? "Interviewing" : payload.status;
+  if (!(BULK_EMAIL_STATUSES as readonly unknown[]).includes(requestedStatus)) {
+    return NextResponse.json(
+      { error: `Unsupported status. Must be one of: ${BULK_EMAIL_STATUSES.join(", ")}.` },
+      { status: 400 }
+    );
+  }
+  const status = requestedStatus as BulkEmailStatus;
 
   // ── Validate ids ─────────────────────────────────────────────────────────
   if (!Array.isArray(payload.ids) || payload.ids.length === 0) {
@@ -101,6 +117,16 @@ export async function POST(request: Request) {
     }
   }
 
+  // The stock Accepted template names {{role}}, which for Ambassador rows is the
+  // applicant's first form preference rather than what they were accepted for.
+  // Refuse to fall back to it: acceptance sends must carry their own text.
+  if (status === "Accepted" && (subjectOverride === undefined || bodyOverride === undefined)) {
+    return NextResponse.json(
+      { error: "Accepted bulk sends require a subject and body." },
+      { status: 400 }
+    );
+  }
+
   // ── Rate-limit: reserve all slots up front or reject ──────────────────────
   // Note: slots reserved upfront are NOT refunded on per-row skip/failure.
   // This is intentional over-consumption accepted for simplicity.
@@ -124,8 +150,8 @@ export async function POST(request: Request) {
   const fetchedMap = new Map(fetched.map((a) => [a.id, a]));
 
   // ── {{roles}} guard ──────────────────────────────────────────────────────
-  // If the caller uses {{roles}} anywhere, an Interviewing recipient with an
-  // empty interview_roles array would fill it to "" and produce a
+  // If the caller uses {{roles}} anywhere, a recipient with an empty
+  // interview_roles array would fill it to "" and produce a
   // grammatically broken sentence. Refuse the whole batch with the offending
   // names so the reviewer can either fix those applicants' roles or edit
   // {{roles}} out of the message. Rate-limit slots are already reserved and
@@ -138,7 +164,7 @@ export async function POST(request: Request) {
   if (usesRolesPlaceholder) {
     const emptyRoleTargets = fetched.filter(
       (app) =>
-        app.status === "Interviewing" &&
+        app.status === status &&
         (app.interview_roles?.length ?? 0) === 0
     );
     if (emptyRoleTargets.length > 0) {
@@ -167,14 +193,14 @@ export async function POST(request: Request) {
       continue;
     }
 
-    // Wrong status
-    if (app.status !== "Interviewing") {
+    // Wrong status — every recipient must be in the status being sent for
+    if (app.status !== status) {
       results.push({ id, ok: false, skipped: "wrong-status" });
       continue;
     }
 
-    // Already sent (pre-check — sendApplicationEmail will also guard)
-    if (app.interview_invite_sent) {
+    // Already sent for this status (pre-check — sendApplicationEmail will also guard)
+    if (app[STATUS_TO_FIELD[status]]) {
       results.push({ id, ok: false, skipped: "duplicate" });
       continue;
     }
@@ -189,7 +215,8 @@ export async function POST(request: Request) {
     // Resolve subject & body — override with placeholder fill, or use template.
     // `roles` drives the {{roles}} placeholder and the roles-branch of the
     // Interviewing template (INTERVIEWING_BODY_WITH_ROLES); passing an empty
-    // array preserves today's single-role behavior.
+    // array preserves today's single-role behavior. The template fallback is
+    // only reachable for Interviewing — Accepted always carries overrides.
     const templateData = {
       name: app.applicant.name,
       role: app.role,
@@ -213,7 +240,7 @@ export async function POST(request: Request) {
 
     if (subjectOverride !== undefined || bodyOverride !== undefined) {
       // Use template as fallback for whichever isn't overridden
-      const template = getEmailTemplate("Interviewing", templateData);
+      const template = getEmailTemplate(status, templateData);
       subject = subjectOverride !== undefined
         ? fill(stripCrlf(subjectOverride), overrideData)
         : template.subject;
@@ -221,12 +248,12 @@ export async function POST(request: Request) {
         ? fill(bodyOverride, overrideData)
         : template.body;
     } else {
-      const template = getEmailTemplate("Interviewing", templateData);
+      const template = getEmailTemplate(status, templateData);
       subject = template.subject;
       body = template.body;
     }
 
-    // Verify status field exists (should always be true for "Interviewing")
+    // Verify status field exists (always true for the statuses allowed above)
     if (!STATUS_TO_FIELD[app.status]) {
       results.push({ id, ok: false, skipped: "wrong-status" });
       continue;
